@@ -15,8 +15,6 @@ FILES_HDR = [
 
 LIB_FILES = [
   ('.', 'context'),
-  ('.', 'incoming'),
-  ('.', 'outgoing'),
 
   ('buckets', 'aggregate_buckets'),
   ('buckets', 'request_buckets'),
@@ -34,10 +32,6 @@ LIB_FILES = [
   ('buckets', 'ssl_buckets'),
   ('buckets', 'barrier_buckets'),
   ('buckets', 'chunk_buckets'),
-  ('auth', 'auth'),
-  ('auth', 'auth_basic'),
-  ('auth', 'auth_digest'),
-  ('auth', 'auth_kerb'),
   ]
 
 TEST_DEPS = [

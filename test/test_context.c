@@ -488,8 +488,8 @@ static void test_serf_setup_proxy(CuTest *tc)
     test_server_action_t action_list_proxy[] = {
         {SERVER_RECV,
          "GET http://localhost:" SERV_PORT_STR " HTTP/1.1" CRLF\
-         "Host: localhost" CRLF\
          "Transfer-Encoding: chunked" CRLF\
+         "Host: localhost" CRLF\
          CRLF\
          "1" CRLF\
          "1" CRLF\
@@ -933,15 +933,13 @@ progress_cb(void *progress_baton, apr_off_t read, apr_off_t written)
     pb->written = written;
 }
 
-static apr_status_t progress_conn_setup(apr_socket_t *skt,
-                                          serf_bucket_t **input_bkt,
-                                          serf_bucket_t **output_bkt,
+static serf_bucket_t* progress_conn_setup(apr_socket_t *skt,
                                           void *setup_baton,
                                           apr_pool_t *pool)
 {
     test_baton_t *tb = setup_baton;
-    *input_bkt = serf_context_bucket_socket_create(tb->context, skt, tb->bkt_alloc);
-    return APR_SUCCESS;
+
+    return serf_context_bucket_socket_create(tb->context, skt, tb->bkt_alloc);
 }
 
 static void test_serf_progress_callback(CuTest *tc)

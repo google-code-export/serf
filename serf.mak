@@ -99,10 +99,6 @@ LIB32_FLAGS=/nologo
 
 LIB32_OBJS= \
     "$(INTDIR)\aggregate_buckets.obj" \
-    "$(INTDIR)\auth.obj" \
-    "$(INTDIR)\auth_basic.obj" \
-    "$(INTDIR)\auth_digest.obj" \
-    "$(INTDIR)\auth_kerb.obj" \
     "$(INTDIR)\context.obj" \
     "$(INTDIR)\allocator.obj" \
     "$(INTDIR)\barrier_buckets.obj" \
@@ -112,10 +108,8 @@ LIB32_OBJS= \
     "$(INTDIR)\deflate_buckets.obj" \
     "$(INTDIR)\file_buckets.obj" \
     "$(INTDIR)\headers_buckets.obj" \
-    "$(INTDIR)\incoming.obj" \
     "$(INTDIR)\limit_buckets.obj" \
     "$(INTDIR)\mmap_buckets.obj" \
-    "$(INTDIR)\outgoing.obj" \
     "$(INTDIR)\request_buckets.obj" \
     "$(INTDIR)\response_buckets.obj" \
     "$(INTDIR)\simple_buckets.obj" \
@@ -170,11 +164,6 @@ CHECK: INTDIR TESTS
     $(CPP_PROJ) $<
 <<
 
-{auth}.c{$(INTDIR)}.obj:
-  $(CPP) @<<
-    $(CPP_PROJ) $<
-<<
-
 {buckets}.c{$(INTDIR)}.obj:
   $(CPP) @<<
     $(CPP_PROJ) $<
@@ -189,10 +178,10 @@ $(INTDIR)\serf_response.exe: $(INTDIR)\serf_response.obj $(STATIC_LIB)
   $(LIB32) /DEBUG /OUT:$@ $** $(LIB32_FLAGS)
 
 $(INTDIR)\serf_get.exe: $(INTDIR)\serf_get.obj $(STATIC_LIB)
-  $(LIB32) /DEBUG /OUT:$@ $** $(LIB32_FLAGS)
+  $(LIB32) /OUT:$@ $** $(LIB32_FLAGS)
 
 $(INTDIR)\serf_request.exe: $(INTDIR)\serf_request.obj $(STATIC_LIB)
-  $(LIB32) /DEBUG /OUT:$@ $** $(LIB32_FLAGS)
+  $(LIB32) /OUT:$@ $** $(LIB32_FLAGS)
 
 $(INTDIR)\test_all.exe: $(TEST_OBJS) $(STATIC_LIB)
   $(LIB32) /DEBUG /OUT:$@ $** $(LIB32_FLAGS)

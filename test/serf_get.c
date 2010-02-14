@@ -41,16 +41,7 @@ static void closed_connection(serf_connection_t *conn,
     }
 }
 
-static apr_status_t ignore_all_cert_errors(void *data, int failures,
-                                           const serf_ssl_certificate_t *cert)
-{
-    /* In a real application, you would normally would not want to do this */
-    return APR_SUCCESS;
-}
-
-static apr_status_t conn_setup(apr_socket_t *skt,
-                                serf_bucket_t **input_bkt,
-                                serf_bucket_t **output_bkt,
+static serf_bucket_t* conn_setup(apr_socket_t *skt,
                                 void *setup_baton,
                                 apr_pool_t *pool)
 {
@@ -63,15 +54,9 @@ static apr_status_t conn_setup(apr_socket_t *skt,
         if (!ctx->ssl_ctx) {
             ctx->ssl_ctx = serf_bucket_ssl_decrypt_context_get(c);
         }
-        serf_ssl_server_cert_callback_set(ctx->ssl_ctx, ignore_all_cert_errors, NULL);
-
-        *output_bkt = serf_bucket_ssl_encrypt_create(*output_bkt, ctx->ssl_ctx,
-                                                    ctx->bkt_alloc);
     }
 
-    *input_bkt = c;
-
-    return APR_SUCCESS;
+    return c;
 }
 
 static serf_bucket_t* accept_response(serf_request_t *request,
@@ -93,9 +78,9 @@ static serf_bucket_t* accept_response(serf_request_t *request,
 
 typedef struct {
 #if APR_MAJOR_VERSION > 0
-    apr_uint32_t completed_requests;
+    apr_uint32_t requests_outstanding;
 #else
-    apr_atomic_t completed_requests;
+    apr_atomic_t requests_outstanding;
 #endif
     int print_headers;
 
@@ -129,13 +114,12 @@ static apr_status_t handle_response(serf_request_t *request,
     apr_status_t status;
     handler_baton_t *ctx = handler_baton;
 
-    if (!response) {
-        /* A NULL response can come back if the request failed completely */
-        return APR_EGENERAL;
-    }
     status = serf_bucket_response_status(response, &sl);
     if (status) {
-        return status;
+        if (APR_STATUS_IS_EAGAIN(status)) {
+            return status;
+        }
+        abort();
     }
 
     while (1) {
@@ -163,7 +147,7 @@ static apr_status_t handle_response(serf_request_t *request,
                 }
             }
 
-            apr_atomic_inc32(&ctx->completed_requests);
+            apr_atomic_dec32(&ctx->requests_outstanding);
             return APR_EOF;
         }
 
@@ -208,12 +192,13 @@ static apr_status_t setup_request(serf_request_t *request,
         body_bkt = NULL;
     }
 
-    *req_bkt = serf_request_bucket_request_create(request, ctx->method,
-                                                  ctx->path, body_bkt,
-                                                  serf_request_get_alloc(request));
+    *req_bkt = serf_bucket_request_create(ctx->method, ctx->path, body_bkt,
+                                          serf_request_get_alloc(request));
 
     hdrs_bkt = serf_bucket_request_get_headers(*req_bkt);
 
+    /* FIXME: Shouldn't we be able to figure out the host ourselves? */
+    serf_bucket_headers_setn(hdrs_bkt, "Host", ctx->host);
     serf_bucket_headers_setn(hdrs_bkt, "User-Agent",
                              "Serf/" SERF_VERSION_STRING);
     /* Shouldn't serf do this for us? */
@@ -221,6 +206,28 @@ static apr_status_t setup_request(serf_request_t *request,
 
     if (ctx->authn != NULL) {
         serf_bucket_headers_setn(hdrs_bkt, "Authorization", ctx->authn);
+    }
+
+    apr_atomic_inc32(&(ctx->requests_outstanding));
+
+    if (ctx->acceptor_baton->using_ssl) {
+        serf_bucket_alloc_t *req_alloc;
+        app_baton_t *app_ctx = ctx->acceptor_baton;
+
+        req_alloc = serf_request_get_alloc(request);
+
+        if (app_ctx->ssl_ctx == NULL) {
+            *req_bkt =
+                serf_bucket_ssl_encrypt_create(*req_bkt, NULL,
+                                               app_ctx->bkt_alloc);
+            app_ctx->ssl_ctx =
+                serf_bucket_ssl_encrypt_context_get(*req_bkt);
+        }
+        else {
+            *req_bkt =
+                serf_bucket_ssl_encrypt_create(*req_bkt, app_ctx->ssl_ctx,
+                                               app_ctx->bkt_alloc);
+        }
     }
 
     *acceptor = ctx->acceptor;
@@ -241,20 +248,19 @@ static void print_usage(apr_pool_t *pool)
     puts("-a <user:password> Present Basic authentication credentials");
     puts("-m <method> Use the <method> HTTP Method");
     puts("-f <file> Use the <file> as the request body");
-    puts("-p <hostname:port> Use the <host:port> as proxy server");
 }
 
 int main(int argc, const char **argv)
 {
     apr_status_t status;
     apr_pool_t *pool;
+    apr_sockaddr_t *address;
     serf_context_t *context;
     serf_connection_t *connection;
     serf_request_t *request;
     app_baton_t app_ctx;
     handler_baton_t handler_ctx;
     apr_uri_t url;
-    const char *proxy = NULL;
     const char *raw_url, *method, *req_body_path = NULL;
     int count;
     int i;
@@ -268,6 +274,7 @@ int main(int argc, const char **argv)
     atexit(apr_terminate);
 
     apr_pool_create(&pool, NULL);
+    apr_atomic_init(pool);
     /* serf_initialize(); */
 
     /* Default to one round of fetching. */
@@ -279,7 +286,7 @@ int main(int argc, const char **argv)
 
     apr_getopt_init(&opt, pool, argc, argv);
 
-    while ((status = apr_getopt(opt, "a:f:hHm:n:vp:", &opt_c, &opt_arg)) ==
+    while ((status = apr_getopt(opt, "a:f:hHm:n:v", &opt_c, &opt_arg)) ==
            APR_SUCCESS) {
         int srclen, enclen;
 
@@ -313,9 +320,6 @@ int main(int argc, const char **argv)
                 return errno;
             }
             break;
-        case 'p':
-            proxy = opt_arg;
-            break;
         case 'v':
             puts("Serf version: " SERF_VERSION_STRING);
             exit(0);
@@ -346,65 +350,26 @@ int main(int argc, const char **argv)
         app_ctx.using_ssl = 0;
     }
 
-    context = serf_context_create(pool);
-
-    if (proxy)
-    {
-        apr_sockaddr_t *proxy_address = NULL;
-        apr_port_t proxy_port;
-        char *proxy_host;
-        char *proxy_scope;
-
-        status = apr_parse_addr_port(&proxy_host, &proxy_scope, &proxy_port, proxy, pool);
-        if (status)
-        {
-            printf("Cannot parse proxy hostname/port: %d\n", status);
-            apr_pool_destroy(pool);
-            exit(1);
-        }
-
-        if (!proxy_host)
-        {
-            printf("Proxy hostname must be specified\n");
-            apr_pool_destroy(pool);
-            exit(1);
-        }
-
-        if (!proxy_port)
-        {
-            printf("Proxy port must be specified\n");
-            apr_pool_destroy(pool);
-            exit(1);
-        }
-
-        status = apr_sockaddr_info_get(&proxy_address, proxy_host, APR_UNSPEC,
-                                       proxy_port, 0, pool);
-
-        if (status)
-        {
-            printf("Cannot resolve proxy address '%s': %d\n", proxy_host, status);
-            apr_pool_destroy(pool);
-            exit(1);
-        }
-
-        serf_config_proxy(context, proxy_address);
+    status = apr_sockaddr_info_get(&address,
+                                   url.hostname, APR_UNSPEC, url.port, 0,
+                                   pool);
+    if (status) {
+        printf("Error creating address: %d\n", status);
+        exit(1);
     }
+
+    context = serf_context_create(pool);
 
     /* ### Connection or Context should have an allocator? */
     app_ctx.bkt_alloc = serf_bucket_allocator_create(pool, NULL, NULL);
     app_ctx.ssl_ctx = NULL;
 
-    status = serf_connection_create2(&connection, context, url,
-                                     conn_setup, &app_ctx,
-                                     closed_connection, &app_ctx,
-                                     pool);
-    if (status) {
-        printf("Error creating connection: %d\n", status);
-        apr_pool_destroy(pool);
-        exit(1);
-    }
+    connection = serf_connection_create(context, address,
+                                        conn_setup, &app_ctx,
+                                        closed_connection, &app_ctx,
+                                        pool);
 
-    handler_ctx.completed_requests = 0;
+    handler_ctx.requests_outstanding = 0;
     handler_ctx.print_headers = print_headers;
 
     handler_ctx.host = url.hostinfo;
@@ -432,10 +397,9 @@ int main(int argc, const char **argv)
 
             printf("Error running context: (%d) %s\n", status,
                    apr_strerror(status, buf, sizeof(buf)));
-            apr_pool_destroy(pool);
             exit(1);
         }
-        if (apr_atomic_read32(&handler_ctx.completed_requests) >= count) {
+        if (!apr_atomic_read32(&handler_ctx.requests_outstanding)) {
             break;
         }
         /* Debugging purposes only! */

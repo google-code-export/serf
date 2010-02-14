@@ -39,16 +39,13 @@ static void default_closed_connection(serf_connection_t *conn,
 }
 
 /* Default implementation of a serf_connection_setup_t callback. */
-static apr_status_t default_conn_setup(apr_socket_t *skt,
-                                       serf_bucket_t **input_bkt,
-                                       serf_bucket_t **output_bkt,
-                                       void *setup_baton,
-                                       apr_pool_t *pool)
+static serf_bucket_t* default_conn_setup(apr_socket_t *skt,
+                                         void *setup_baton,
+                                         apr_pool_t *pool)
 {
     test_baton_t *ctx = setup_baton;
 
-    *input_bkt = serf_bucket_socket_create(skt, ctx->bkt_alloc);
-    return APR_SUCCESS;
+    return serf_bucket_socket_create(skt, ctx->bkt_alloc);
 }
 
 static apr_status_t get_server_address(apr_sockaddr_t **address,

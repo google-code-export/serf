@@ -122,58 +122,9 @@ SERF_DECLARE(void) serf_bucket_response_set_head(serf_bucket_t *bucket);
 
 /* ==================================================================== */
 
-SERF_DECLARE_DATA extern const serf_bucket_type_t serf_bucket_type_bwtp_frame;
-#define SERF_BUCKET_IS_BWTP_FRAME(b) SERF_BUCKET_CHECK((b), bwtp_frame)
-
-SERF_DECLARE_DATA extern const serf_bucket_type_t serf_bucket_type_bwtp_incoming_frame;
-#define SERF_BUCKET_IS_BWTP_INCOMING_FRAME(b) SERF_BUCKET_CHECK((b), bwtp_incoming_frame)
-
-SERF_DECLARE(int) serf_bucket_bwtp_frame_get_channel(serf_bucket_t *hdr);
-
-SERF_DECLARE(int) serf_bucket_bwtp_frame_get_type(serf_bucket_t *hdr);
-
-SERF_DECLARE(const char *) serf_bucket_bwtp_frame_get_phrase(serf_bucket_t *hdr);
-
-SERF_DECLARE(serf_bucket_t *) serf_bucket_bwtp_frame_get_headers(
-    serf_bucket_t *hdr);
-
-SERF_DECLARE(serf_bucket_t *) serf_bucket_bwtp_channel_open(
-    int channel,
-    const char *URI,
-    serf_bucket_alloc_t *allocator);
-
-SERF_DECLARE(serf_bucket_t *) serf_bucket_bwtp_channel_close(
-    int channel,
-    serf_bucket_alloc_t *allocator);
-
-SERF_DECLARE(serf_bucket_t *) serf_bucket_bwtp_header_create(
-    int channel,
-    const char *phrase,
-    serf_bucket_alloc_t *allocator);
-
-SERF_DECLARE(serf_bucket_t *) serf_bucket_bwtp_message_create(
-    int channel,
-    serf_bucket_t *body,
-    serf_bucket_alloc_t *allocator);
-
-SERF_DECLARE(serf_bucket_t *) serf_bucket_bwtp_incoming_frame_create(
-    serf_bucket_t *bkt,
-    serf_bucket_alloc_t *allocator);
-
-SERF_DECLARE(apr_status_t) serf_bucket_bwtp_incoming_frame_wait_for_headers(
-    serf_bucket_t *bkt);
-
-/* ==================================================================== */
-
 
 SERF_DECLARE_DATA extern const serf_bucket_type_t serf_bucket_type_aggregate;
 #define SERF_BUCKET_IS_AGGREGATE(b) SERF_BUCKET_CHECK((b), aggregate)
-
-/** serf_bucket_aggregate_cleanup will instantly destroy all buckets in
-    the aggregate bucket that have been read completely. Whereas normally, 
-    these buckets are destroyed on every read operation. */ 
-SERF_DECLARE(void) serf_bucket_aggregate_cleanup(
-    serf_bucket_t *bucket, serf_bucket_alloc_t *allocator);
 
 SERF_DECLARE(serf_bucket_t *) serf_bucket_aggregate_create(
     serf_bucket_alloc_t *allocator);
@@ -188,12 +139,6 @@ SERF_DECLARE(void) serf_bucket_aggregate_prepend(
 SERF_DECLARE(void) serf_bucket_aggregate_append(
     serf_bucket_t *aggregate_bucket,
     serf_bucket_t *append_bucket);
-
-typedef apr_status_t (*serf_bucket_aggregate_eof_t)(void *baton, serf_bucket_t *aggregate_bucket);
-    
-SERF_DECLARE(void) serf_bucket_aggregate_hold_open(serf_bucket_t *aggregate_bucket,
-                                                   serf_bucket_aggregate_eof_t fn,
-                                                   void *baton);
 
 SERF_DECLARE(void) serf_bucket_aggregate_prepend_iovec(
     serf_bucket_t *aggregate_bucket,
@@ -365,11 +310,6 @@ typedef int (serf_bucket_headers_do_callback_fn_t)(
     const char *value);
 
 /**
- * Iterates over all headers of the message and invokes the callback 
- * function with header key and value. Stop iterating when no more
- * headers are available or when the callback function returned a 
- * non-0 value.
- *
  * @param headers_bucket headers to iterate over
  * @param func callback routine to invoke for every header in the bucket
  * @param baton baton to pass on each invocation to func

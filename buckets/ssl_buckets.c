@@ -80,7 +80,6 @@
  *            |- 2. Try to read from ctx->stream [REQUEST bucket]
  *            |- 3. Call SSL_write with read data
  *              |- ...
- *                |- bio_bucket_read can be called
  *                |- bio_bucket_write with encrypted data
  *                  |- store in sink
  *            |- 4. If successful, read pending encrypted data and return.
@@ -101,7 +100,6 @@
  *              |- 3. Append data to ssl_ctx->source
  *              |- 4. Call SSL_read()
  *                |- ...
- *                  |- bio_bucket_write can be called
  *                  |- bio_bucket_read
  *                    |- read data from ssl_ctx->source
  *              |- If data read, return it.
@@ -485,7 +483,7 @@ static apr_status_t ssl_decrypt(void *baton, apr_size_t bufsize,
                 break;
             case SSL_ERROR_SSL:
                 *len = 0;
-                status = ctx->pending_err ? ctx->pending_err : APR_EGENERAL;
+                status = ctx->pending_err;
                 ctx->pending_err = 0;
                 break;
             default:
@@ -621,8 +619,8 @@ static apr_status_t ssl_encrypt(void *baton, apr_size_t bufsize,
 }
 
 #if APR_HAS_THREADS
-static apr_pool_t *ssl_pool;
-static apr_thread_mutex_t **ssl_locks;
+apr_pool_t *ssl_pool;
+apr_thread_mutex_t **ssl_locks;
 
 typedef struct CRYPTO_dynlock_value {
     apr_thread_mutex_t *lock;
@@ -921,7 +919,6 @@ static serf_ssl_context_t *ssl_init_context(void)
     SSL_CTX_set_client_cert_cb(ssl_ctx->ctx, ssl_need_client_cert);
     ssl_ctx->cached_cert = 0;
     ssl_ctx->cached_cert_pw = 0;
-    ssl_ctx->pending_err = APR_SUCCESS;
 
     SSL_CTX_set_verify(ssl_ctx->ctx, SSL_VERIFY_PEER,
                        validate_server_certificate);
@@ -939,14 +936,14 @@ static serf_ssl_context_t *ssl_init_context(void)
 
     ssl_ctx->encrypt.stream = NULL;
     ssl_ctx->encrypt.stream_next = NULL;
-    ssl_ctx->encrypt.pending = serf_bucket_aggregate_create(allocator);
+    ssl_ctx->encrypt.pending = NULL;
     ssl_ctx->encrypt.status = APR_SUCCESS;
     serf_databuf_init(&ssl_ctx->encrypt.databuf);
     ssl_ctx->encrypt.databuf.read = ssl_encrypt;
     ssl_ctx->encrypt.databuf.read_baton = ssl_ctx;
 
     ssl_ctx->decrypt.stream = NULL;
-    ssl_ctx->decrypt.pending = serf_bucket_aggregate_create(allocator);
+    ssl_ctx->decrypt.pending = NULL;
     ssl_ctx->decrypt.status = APR_SUCCESS;
     serf_databuf_init(&ssl_ctx->decrypt.databuf);
     ssl_ctx->decrypt.databuf.read = ssl_decrypt;
@@ -1089,6 +1086,8 @@ SERF_DECLARE(serf_bucket_t *) serf_bucket_ssl_encrypt_create(
     ctx->our_stream = &ctx->ssl_ctx->encrypt.stream;
     if (ctx->ssl_ctx->encrypt.stream == NULL) {
         ctx->ssl_ctx->encrypt.stream = stream;
+        ctx->ssl_ctx->encrypt.pending =
+            serf_bucket_aggregate_create(allocator);
     }
     else {
         bucket_list_t *new_list;
@@ -1370,9 +1369,6 @@ SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_ssl_encrypt = {
     serf_default_read_bucket,
     serf_ssl_peek,
     serf_ssl_encrypt_destroy_and_data,
-    serf_default_snapshot,
-    serf_default_restore_snapshot,
-    serf_default_is_snapshot_set,
 };
 
 SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_ssl_decrypt = {

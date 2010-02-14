@@ -44,9 +44,6 @@ typedef struct serf_bucket_type_t serf_bucket_type_t;
 typedef struct serf_bucket_alloc_t serf_bucket_alloc_t;
 
 typedef struct serf_connection_t serf_connection_t;
-typedef struct serf_listener_t serf_listener_t;
-typedef struct serf_incoming_t serf_incoming_t;
-typedef struct serf_incoming_request_t serf_incoming_request_t;
 
 typedef struct serf_request_t serf_request_t;
 
@@ -72,19 +69,6 @@ typedef struct serf_request_t serf_request_t;
  */
 #define SERF_ERROR_REQUEST_LOST (APR_OS_START_USERERR + SERF_ERROR_RANGE + 2)
 
-/* General authentication related errors */
-#define SERF_ERROR_AUTHN_FAILED (APR_OS_START_USERERR + SERF_ERROR_RANGE + 90)
-
-/* None of the available authn mechanisms for the request are supported */
-#define SERF_ERROR_AUTHN_NOT_SUPPORTED (APR_OS_START_USERERR + SERF_ERROR_RANGE + 91)
-
-/* Authn was requested by the server but the header lacked some attribute  */
-#define SERF_ERROR_AUTHN_MISSING_ATTRIBUTE (APR_OS_START_USERERR + SERF_ERROR_RANGE + 92)
-
-/* Authentication handler initialization related errors */
-#define SERF_ERROR_AUTHN_INITALIZATION_FAILED (APR_OS_START_USERERR +\
-    SERF_ERROR_RANGE + 93)
-
 /**
  * Create a new context for serf operations.
  *
@@ -105,7 +89,7 @@ typedef apr_status_t (*serf_socket_add_t)(void *user_baton,
                                           apr_pollfd_t *pfd,
                                           void *serf_baton);
 /**
- * Callback function. Remove the socket, identified by both @a pfd and
+ * Callback function. Remove the socket, identified by both @a pfd and 
  * @a serf_baton from the externally managed poll set.
  */
 typedef apr_status_t (*serf_socket_remove_t)(void *user_baton,
@@ -115,8 +99,8 @@ typedef apr_status_t (*serf_socket_remove_t)(void *user_baton,
 /* Create a new context for serf operations.
  *
  * Use this function to make serf not use its internal control loop, but
- * instead rely on an external event loop. Serf will use the @a addf and @a rmf
- * callbacks to notify of any event on a connection. The @a user_baton will be
+ * instead rely on an external event loop. Serf will use the @a addf and @a rmf 
+ * callbacks to notify of any event on a connection. The @a user_baton will be 
  * passed through the addf and rmf callbacks.
  *
  * The context will be allocated within @a pool.
@@ -127,7 +111,7 @@ SERF_DECLARE(serf_context_t *) serf_context_create_ex(void *user_baton,
                                                       apr_pool_t *pool);
 
 /**
- * Make serf process events on a connection, identified by both @a pfd and
+ * Make serf process events on a connection, identified by both @a pfd and 
  * @a serf_baton.
  *
  * Any outbound data is delivered, and incoming data is made available to
@@ -214,14 +198,12 @@ SERF_DECLARE(void) serf_context_set_progress_cb(
  * ### callback. it may be wasteful to create a per-conn allocator, so this
  * ### baton-based, app-responsible form might be best.
  *
- * Responsibility for the buckets is passed to the serf library. They will be
+ * Responsibility for the bucket is passed to the serf library. It will be
  * destroyed when the connection is closed.
  *
  * All temporary allocations should be made in @a pool.
  */
-typedef apr_status_t (*serf_connection_setup_t)(apr_socket_t *skt,
-                                                   serf_bucket_t **read_bkt,
-                                                   serf_bucket_t **write_bkt,
+typedef serf_bucket_t * (*serf_connection_setup_t)(apr_socket_t *skt,
                                                    void *setup_baton,
                                                    apr_pool_t *pool);
 
@@ -309,20 +291,6 @@ typedef apr_status_t (*serf_response_handler_t)(serf_request_t *request,
                                                 apr_pool_t *pool);
 
 /**
- * Callback function to be implemented by the application, so that serf
- * can handle server and proxy authentication.
- * code = 401 (server) or 407 (proxy).
- * baton = the baton passed to serf_context_run.
- * authn_type = one of "Basic", "Digest".
- */
-typedef apr_status_t (*serf_credentials_callback_t)(char **username,
-    char **password,
-    serf_request_t *request, void *baton,
-    int code, const char *authn_type,
-    const char *realm,
-    apr_pool_t *pool);
-
-/**
  * Create a new connection associated with the @a ctx serf context.
  *
  * A connection will be created to (eventually) connect to the address
@@ -385,38 +353,6 @@ SERF_DECLARE(apr_status_t) serf_connection_create2(
     void *closed_baton,
     apr_pool_t *pool);
 
-
-typedef apr_status_t (*serf_accept_client_t)(serf_context_t *ctx,
-                                        serf_listener_t *l,
-                                        void *accept_baton,
-                                        apr_socket_t *insock,
-                                        apr_pool_t *pool);
-
-SERF_DECLARE(apr_status_t) serf_listener_create(
-    serf_listener_t **listener,
-    serf_context_t *ctx,
-    const char *host,
-    apr_uint16_t port,
-    void *accept_baton,
-    serf_accept_client_t accept,
-    apr_pool_t *pool);
-
-typedef apr_status_t (*serf_incoming_request_cb_t)(serf_context_t *ctx,
-                                        serf_incoming_request_t *req,
-                                        void *request_baton,
-                                        apr_pool_t *pool);
-
-SERF_DECLARE(apr_status_t) serf_incoming_create(
-    serf_incoming_t **client,
-    serf_context_t *ctx,
-    apr_socket_t *insock,
-    void *request_baton,
-    serf_incoming_request_cb_t request,
-    apr_pool_t *pool);
-
-
-
-
 /**
  * Reset the connection, but re-open the socket again.
  */
@@ -441,13 +377,6 @@ SERF_DECLARE(apr_status_t) serf_connection_close(
 SERF_DECLARE(void)
 serf_connection_set_max_outstanding_requests(serf_connection_t *conn,
                                              unsigned int max_requests);
-
-SERF_DECLARE(void)
-serf_connection_set_async_responses(serf_connection_t *conn,
-                                    serf_response_acceptor_t acceptor,
-                                    void *acceptor_baton,
-                                    serf_response_handler_t handler,
-                                    void *handler_baton);
 
 /**
  * Setup the @a request for delivery on its connection.
@@ -570,36 +499,14 @@ SERF_DECLARE(void) serf_config_proxy(
     serf_context_t *ctx,
     apr_sockaddr_t *address);
 
-/* Supported authentication types. */
-#define SERF_AUTHN_NONE      0x00
-#define SERF_AUTHN_BASIC     0x01
-#define SERF_AUTHN_DIGEST    0x02
-#define SERF_AUTHN_NTLM      0x04
-#define SERF_AUTHN_NEGOTIATE 0x08
-#define SERF_AUTHN_ALL       0xFF
-
-/**
- * Define the authentication handlers that serf will try on incoming requests.
- */
-SERF_DECLARE(void) serf_config_authn_types(
-    serf_context_t *ctx,
-    int authn_types);
-
-/**
- * Set the credentials callback handler.
- */
-SERF_DECLARE(void) serf_config_credentials_callback(
-    serf_context_t *ctx,
-    serf_credentials_callback_t cred_cb);
-
 /* ### maybe some connection control functions for flood? */
 
 /*** Special bucket creation functions ***/
 
 /**
- * Create a bucket of type 'socket bucket'.
- * This is basically a wrapper around @a serf_bucket_socket_create, which
- * initializes the bucket using connection and/or context specific settings.
+ * Create a bucket of type 'socket bucket'. 
+ * This is basically a wrapper around @a serf_bucket_socket_create, which 
+ * initializes the bucket using connection and/or context specific settings. 
  */
 SERF_DECLARE(serf_bucket_t *) serf_context_bucket_socket_create(
     serf_context_t *ctx,
@@ -607,8 +514,8 @@ SERF_DECLARE(serf_bucket_t *) serf_context_bucket_socket_create(
     serf_bucket_alloc_t *allocator);
 
 /**
- * Create a bucket of type 'request bucket'.
- * This is basically a wrapper around @a serf_bucket_request_create, which
+ * Create a bucket of type 'request bucket'. 
+ * This is basically a wrapper around @a serf_bucket_request_create, which 
  * initializes the bucket using request, connection and/or context specific
  * settings.
  *
@@ -807,13 +714,13 @@ struct serf_bucket_type_t {
     /**
      * Restore the state of the @a bucket to the state set in the last
      * snapshot and returns APR_SUCCESS. If no snapshot was set, the bucket's
-     * state is unchanged and APR_SUCCESS is returned.
+     * state is unchanged and APR_SUCCESS is returned. 
      * In case of error, the bucket should be considered invalid.
      */
     apr_status_t (*restore_snapshot)(serf_bucket_t *bucket);
 
     /**
-     * Test if a snapshot is set. Returns 0 if no snapshot was set, a non-0
+     * Test if a snapshot is set. Returns 0 if no snapshot was set, a non-0 
      * value if there is a snapshot set.
      */
     int (*is_snapshot_set)(serf_bucket_t *bucket);
@@ -1002,8 +909,8 @@ SERF_DECLARE(void) serf_debug__bucket_alloc_check(serf_bucket_alloc_t *allocator
 
 /* Version info */
 #define SERF_MAJOR_VERSION 0
-#define SERF_MINOR_VERSION 4
-#define SERF_PATCH_VERSION 0
+#define SERF_MINOR_VERSION 3
+#define SERF_PATCH_VERSION 1
 
 /* Version number string */
 #define SERF_VERSION_STRING APR_STRINGIFY(SERF_MAJOR_VERSION) "." \
@@ -1040,4 +947,4 @@ SERF_DECLARE(void) serf_debug__bucket_alloc_check(serf_bucket_alloc_t *allocator
 #include "serf_bucket_types.h"
 
 
-#endif    /* !SERF_H */
+#endif	/* !SERF_H */

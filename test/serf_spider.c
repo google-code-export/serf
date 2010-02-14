@@ -78,9 +78,7 @@ static void closed_connection(serf_connection_t *conn,
     }
 }
 
-static apr_status_t conn_setup(apr_socket_t *skt,
-                                serf_bucket_t **input_bkt,
-                                serf_bucket_t **output_bkt,
+static serf_bucket_t* conn_setup(apr_socket_t *skt,
                                 void *setup_baton,
                                 apr_pool_t *pool)
 {
@@ -92,9 +90,7 @@ static apr_status_t conn_setup(apr_socket_t *skt,
         c = serf_bucket_ssl_decrypt_create(c, ctx->ssl_ctx, ctx->bkt_alloc);
     }
 
-    *input_bkt = c;
-
-    return APR_SUCCESS;
+    return c;
 }
 
 static serf_bucket_t* accept_response(serf_request_t *request,

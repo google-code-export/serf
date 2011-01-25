@@ -24,15 +24,13 @@
 
 static void test_simple_bucket_readline(CuTest *tc)
 {
+    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
+                                                              NULL);
     apr_status_t status;
     serf_bucket_t *bkt;
     const char *data;
     int found;
     apr_size_t len;
-
-    apr_pool_t *test_pool = test_setup();
-    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
-                                                              NULL);
 
     bkt = SERF_BUCKET_SIMPLE_STRING(
         "line1" CRLF
@@ -58,7 +56,6 @@ static void test_simple_bucket_readline(CuTest *tc)
     CuAssertIntEquals(tc, SERF_NEWLINE_NONE, found);
     CuAssertIntEquals(tc, 5, len);
     CuAssert(tc, data, strncmp("line2", data, len) == 0);
-    test_teardown(test_pool);
 }
 
 /* Reads bucket until EOF found and compares read data with zero terminated
@@ -88,11 +85,9 @@ static void read_and_check_bucket(CuTest *tc, serf_bucket_t *bkt,
 
 static void test_response_bucket_read(CuTest *tc)
 {
-    serf_bucket_t *bkt, *tmp;
-
-    apr_pool_t *test_pool = test_setup();
     serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
                                                               NULL);
+    serf_bucket_t *bkt, *tmp;
 
     tmp = SERF_BUCKET_SIMPLE_STRING(
         "HTTP/1.1 200 OK" CRLF
@@ -105,16 +100,13 @@ static void test_response_bucket_read(CuTest *tc)
 
     /* Read all bucket and check it content. */
     read_and_check_bucket(tc, bkt, "abc1234");
-    test_teardown(test_pool);
 }
 
 static void test_response_bucket_headers(CuTest *tc)
 {
-    serf_bucket_t *bkt, *tmp, *hdr;
-
-    apr_pool_t *test_pool = test_setup();
     serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
                                                               NULL);
+    serf_bucket_t *bkt, *tmp, *hdr;
 
     tmp = SERF_BUCKET_SIMPLE_STRING(
         "HTTP/1.1 405 Method Not Allowed" CRLF
@@ -143,16 +135,13 @@ static void test_response_bucket_headers(CuTest *tc)
     CuAssertStrEquals(tc,
         "",
         serf_bucket_headers_get(hdr, "NoSpace"));
-    test_teardown(test_pool);
 }
 
 static void test_response_bucket_chunked_read(CuTest *tc)
 {
-    serf_bucket_t *bkt, *tmp, *hdrs;
-
-    apr_pool_t *test_pool = test_setup();
     serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
                                                               NULL);
+    serf_bucket_t *bkt, *tmp, *hdrs;
 
     tmp = SERF_BUCKET_SIMPLE_STRING(
         "HTTP/1.1 200 OK" CRLF
@@ -177,12 +166,10 @@ static void test_response_bucket_chunked_read(CuTest *tc)
 
     /* Check that trailing headers parsed correctly. */
     CuAssertStrEquals(tc, "value", serf_bucket_headers_get(hdrs, "Footer"));
-    test_teardown(test_pool);
 }
 
 static void test_bucket_header_set(CuTest *tc)
 {
-    apr_pool_t *test_pool = test_setup();
     serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
                                                               NULL);
     serf_bucket_t *hdrs = serf_bucket_headers_create(alloc);
@@ -203,20 +190,17 @@ static void test_bucket_header_set(CuTest *tc)
 
     // headers are case insensitive.
     CuAssertStrEquals(tc, "bar,baz,test", serf_bucket_headers_get(hdrs, "fOo"));
-    test_teardown(test_pool);
 }
 
 static void test_simple_read_restore_snapshot_read(CuTest *tc)
 {
+    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
+                                                              NULL);
     apr_status_t status;
     serf_bucket_t *bkt;
     const char *data;
     int found;
     apr_size_t len;
-
-    apr_pool_t *test_pool = test_setup();
-    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
-                                                              NULL);
 
     bkt = SERF_BUCKET_SIMPLE_STRING(
         "line1" CRLF
@@ -255,7 +239,6 @@ static void test_simple_read_restore_snapshot_read(CuTest *tc)
     CuAssertIntEquals(tc, SERF_NEWLINE_NONE, found);
     CuAssertIntEquals(tc, 5, len);
     CuAssert(tc, data, strncmp("line2", data, len) == 0);
-    test_teardown(test_pool);
 }
 
 static apr_status_t read_requested_bytes(serf_bucket_t *bkt,
@@ -285,15 +268,13 @@ static apr_status_t read_requested_bytes(serf_bucket_t *bkt,
 
 static void test_aggregate_read_restore_snapshot_read(CuTest *tc)
 {
+    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
+                                                              NULL);
     apr_status_t status;
     serf_bucket_t *bkt;
     serf_bucket_t *tmp;
     const char *data;
     apr_size_t len;
-
-    apr_pool_t *test_pool = test_setup();
-    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
-                                                              NULL);
 
     bkt = serf_bucket_aggregate_create(alloc);
 
@@ -332,7 +313,6 @@ static void test_aggregate_read_restore_snapshot_read(CuTest *tc)
     CuAssertIntEquals(tc, APR_EOF, status);
     CuAssertIntEquals(tc, 24, len);
     CuAssert(tc, data, strncmp("<tagname>value</tagname>", data, len) == 0);
-    test_teardown(test_pool);
 }
 
 CuSuite *test_buckets(void)

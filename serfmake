@@ -5,7 +5,6 @@ import re
 import shutil
 import sys
 import stat
-import copy
 
 FILES_HDR = [
   ('.', 'serf'),
@@ -34,7 +33,6 @@ LIB_FILES = [
   ('buckets', 'ssl_buckets'),
   ('buckets', 'barrier_buckets'),
   ('buckets', 'chunk_buckets'),
-  ('buckets', 'iovec_buckets'),
   ('auth', 'auth'),
   ('auth', 'auth_basic'),
   ('auth', 'auth_digest'),
@@ -229,7 +227,7 @@ class Builder:
     self._add_dep(lib, libobjs, cmd)
 
     # load the test program dependencies now
-    testhdrs = copy.deepcopy(hdrs)
+    testhdrs = hdrs
     testhdrs += [File(dirpath, fname, 'h') for dirpath, fname in TEST_HDR_FILES]
     testdeps = [File(dirpath, fname, 'c') for dirpath, fname in TEST_DEPS]
     testobjs = [File(dirpath, fname, 'lo') for dirpath, fname in TEST_DEPS]

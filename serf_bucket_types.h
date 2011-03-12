@@ -606,17 +606,6 @@ serf_bucket_t *serf_bucket_barrier_create(
 
 /* ==================================================================== */
 
-extern const serf_bucket_type_t serf_bucket_type_iovec;
-#define SERF_BUCKET_IS_IOVEC(b) SERF_BUCKET_CHECK((b), iovec)
-
-serf_bucket_t *serf_bucket_iovec_create(
-    struct iovec vecs[],
-    int len,
-    serf_bucket_alloc_t *allocator);
-
-
-/* ==================================================================== */
-
 /* ### do we need a PIPE bucket type? they are simple apr_file_t objects */
 
 

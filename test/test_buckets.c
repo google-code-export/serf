@@ -24,15 +24,13 @@
 
 static void test_simple_bucket_readline(CuTest *tc)
 {
+    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
+                                                              NULL);
     apr_status_t status;
     serf_bucket_t *bkt;
     const char *data;
     int found;
     apr_size_t len;
-
-    apr_pool_t *test_pool = test_setup();
-    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
-                                                              NULL);
 
     bkt = SERF_BUCKET_SIMPLE_STRING(
         "line1" CRLF
@@ -58,7 +56,6 @@ static void test_simple_bucket_readline(CuTest *tc)
     CuAssertIntEquals(tc, SERF_NEWLINE_NONE, found);
     CuAssertIntEquals(tc, 5, len);
     CuAssert(tc, data, strncmp("line2", data, len) == 0);
-    test_teardown(test_pool);
 }
 
 /* Reads bucket until EOF found and compares read data with zero terminated
@@ -88,11 +85,9 @@ static void read_and_check_bucket(CuTest *tc, serf_bucket_t *bkt,
 
 static void test_response_bucket_read(CuTest *tc)
 {
-    serf_bucket_t *bkt, *tmp;
-
-    apr_pool_t *test_pool = test_setup();
     serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
                                                               NULL);
+    serf_bucket_t *bkt, *tmp;
 
     tmp = SERF_BUCKET_SIMPLE_STRING(
         "HTTP/1.1 200 OK" CRLF
@@ -105,16 +100,13 @@ static void test_response_bucket_read(CuTest *tc)
 
     /* Read all bucket and check it content. */
     read_and_check_bucket(tc, bkt, "abc1234");
-    test_teardown(test_pool);
 }
 
 static void test_response_bucket_headers(CuTest *tc)
 {
-    serf_bucket_t *bkt, *tmp, *hdr;
-
-    apr_pool_t *test_pool = test_setup();
     serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
                                                               NULL);
+    serf_bucket_t *bkt, *tmp, *hdr;
 
     tmp = SERF_BUCKET_SIMPLE_STRING(
         "HTTP/1.1 405 Method Not Allowed" CRLF
@@ -143,16 +135,13 @@ static void test_response_bucket_headers(CuTest *tc)
     CuAssertStrEquals(tc,
         "",
         serf_bucket_headers_get(hdr, "NoSpace"));
-    test_teardown(test_pool);
 }
 
 static void test_response_bucket_chunked_read(CuTest *tc)
 {
-    serf_bucket_t *bkt, *tmp, *hdrs;
-
-    apr_pool_t *test_pool = test_setup();
     serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
                                                               NULL);
+    serf_bucket_t *bkt, *tmp, *hdrs;
 
     tmp = SERF_BUCKET_SIMPLE_STRING(
         "HTTP/1.1 200 OK" CRLF
@@ -177,12 +166,10 @@ static void test_response_bucket_chunked_read(CuTest *tc)
 
     /* Check that trailing headers parsed correctly. */
     CuAssertStrEquals(tc, "value", serf_bucket_headers_get(hdrs, "Footer"));
-    test_teardown(test_pool);
 }
 
 static void test_bucket_header_set(CuTest *tc)
 {
-    apr_pool_t *test_pool = test_setup();
     serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
                                                               NULL);
     serf_bucket_t *hdrs = serf_bucket_headers_create(alloc);
@@ -203,20 +190,17 @@ static void test_bucket_header_set(CuTest *tc)
 
     // headers are case insensitive.
     CuAssertStrEquals(tc, "bar,baz,test", serf_bucket_headers_get(hdrs, "fOo"));
-    test_teardown(test_pool);
 }
 
 static void test_simple_read_restore_snapshot_read(CuTest *tc)
 {
+    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
+                                                              NULL);
     apr_status_t status;
     serf_bucket_t *bkt;
     const char *data;
     int found;
     apr_size_t len;
-
-    apr_pool_t *test_pool = test_setup();
-    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
-                                                              NULL);
 
     bkt = SERF_BUCKET_SIMPLE_STRING(
         "line1" CRLF
@@ -255,7 +239,6 @@ static void test_simple_read_restore_snapshot_read(CuTest *tc)
     CuAssertIntEquals(tc, SERF_NEWLINE_NONE, found);
     CuAssertIntEquals(tc, 5, len);
     CuAssert(tc, data, strncmp("line2", data, len) == 0);
-    test_teardown(test_pool);
 }
 
 static apr_status_t read_requested_bytes(serf_bucket_t *bkt,
@@ -285,15 +268,13 @@ static apr_status_t read_requested_bytes(serf_bucket_t *bkt,
 
 static void test_aggregate_read_restore_snapshot_read(CuTest *tc)
 {
+    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
+                                                              NULL);
     apr_status_t status;
     serf_bucket_t *bkt;
     serf_bucket_t *tmp;
     const char *data;
     apr_size_t len;
-
-    apr_pool_t *test_pool = test_setup();
-    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
-                                                              NULL);
 
     bkt = serf_bucket_aggregate_create(alloc);
 
@@ -332,150 +313,6 @@ static void test_aggregate_read_restore_snapshot_read(CuTest *tc)
     CuAssertIntEquals(tc, APR_EOF, status);
     CuAssertIntEquals(tc, 24, len);
     CuAssert(tc, data, strncmp("<tagname>value</tagname>", data, len) == 0);
-    test_teardown(test_pool);
-}
-
-static void test_iovec_buckets(CuTest *tc)
-{
-    apr_status_t status;
-    serf_bucket_t *bkt, *iobkt;
-    const char *data;
-    int found;
-    apr_size_t len;
-    struct iovec vecs[32];
-    struct iovec tgt_vecs[32];
-    int i;
-    int vecs_used;
-
-    apr_pool_t *test_pool = test_setup();
-    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
-                                                              NULL);
-
-    /* Test 1: Read a single string in an iovec, store it in a iovec_bucket
-       and then read it back. */
-    bkt = SERF_BUCKET_SIMPLE_STRING(
-        "line1" CRLF
-        "line2",
-        alloc);
-
-    status = serf_bucket_read_iovec(bkt, SERF_READ_ALL_AVAIL, 32, vecs,
-                                    &vecs_used);
-
-    iobkt = serf_bucket_iovec_create(vecs, vecs_used, alloc);
-
-    /* Check available data */
-    status = serf_bucket_peek(iobkt, &data, &len);
-    CuAssertIntEquals(tc, APR_EOF, status);
-    CuAssertIntEquals(tc, strlen("line1" CRLF "line2"), len);
-
-    /* Try to read only a few bytes (less than what's in the first buffer). */
-    status = serf_bucket_read_iovec(iobkt, 3, 32, tgt_vecs, &vecs_used);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-    CuAssertIntEquals(tc, 1, vecs_used);
-    CuAssertIntEquals(tc, 3, tgt_vecs[0].iov_len);
-    CuAssert(tc, tgt_vecs[0].iov_base,
-             strncmp("lin", tgt_vecs[0].iov_base, tgt_vecs[0].iov_len) == 0);
-
-    /* Read the rest of the data. */
-    status = serf_bucket_read_iovec(iobkt, SERF_READ_ALL_AVAIL, 32, tgt_vecs,
-                                    &vecs_used);
-    CuAssertIntEquals(tc, APR_EOF, status);
-    CuAssertIntEquals(tc, 1, vecs_used);
-    CuAssertIntEquals(tc, strlen("e1" CRLF "line2"), tgt_vecs[0].iov_len);
-    CuAssert(tc, tgt_vecs[0].iov_base,
-             strncmp("e1" CRLF "line2", tgt_vecs[0].iov_base, tgt_vecs[0].iov_len - 3) == 0);
-
-    /* Bucket should now be empty */
-    status = serf_bucket_peek(iobkt, &data, &len);
-    CuAssertIntEquals(tc, APR_EOF, status);
-    CuAssertIntEquals(tc, 0, len);
-
-    /* Test 2: Read multiple character bufs in an iovec, then read them back
-       in bursts. */
-    for (i = 0; i < 32 ; i++) {
-        vecs[i].iov_base = apr_psprintf(test_pool, "data %02d 901234567890", i);
-        vecs[i].iov_len = strlen(vecs[i].iov_base);
-    }
-
-    iobkt = serf_bucket_iovec_create(vecs, 32, alloc);
-
-    /* Check that some data is in the buffer. Don't verify the actual data, the
-       amount of data returned is not guaranteed to be the full buffer. */
-    status = serf_bucket_peek(iobkt, &data, &len);
-    CuAssertTrue(tc, len > 0);
-    CuAssertIntEquals(tc, APR_SUCCESS, status); /* this assumes not all data is
-                                                   returned at once,
-                                                   not guaranteed! */
-
-    /* Read 1 buf.   20 = sizeof("data %2d 901234567890") */
-    status = serf_bucket_read_iovec(iobkt, 1 * 20, 32,
-                                    tgt_vecs, &vecs_used);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-    CuAssertIntEquals(tc, 1, vecs_used);
-    CuAssert(tc, tgt_vecs[0].iov_base,
-             strncmp("data 00 901234567890", tgt_vecs[0].iov_base, tgt_vecs[0].iov_len) == 0);
-
-    /* Read 2 bufs. */
-    status = serf_bucket_read_iovec(iobkt, 2 * 20, 32,
-                                    tgt_vecs, &vecs_used);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-    CuAssertIntEquals(tc, 2, vecs_used);
-
-    /* Read the remaining 29 bufs. */
-    vecs_used = 400;  /* test if iovec code correctly resets vecs_used */
-    status = serf_bucket_read_iovec(iobkt, SERF_READ_ALL_AVAIL, 32,
-                                    tgt_vecs, &vecs_used);
-    CuAssertIntEquals(tc, APR_EOF, status);
-    CuAssertIntEquals(tc, 29, vecs_used);
-
-    /* Test 3: use serf_bucket_read */
-    for (i = 0; i < 32 ; i++) {
-        vecs[i].iov_base = apr_psprintf(test_pool, "DATA %02d 901234567890", i);
-        vecs[i].iov_len = strlen(vecs[i].iov_base);
-    }
-
-    iobkt = serf_bucket_iovec_create(vecs, 32, alloc);
-
-    status = serf_bucket_read(iobkt, 10, &data, &len);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-    CuAssertIntEquals(tc, 10, len);
-    CuAssert(tc, data,
-             strncmp("DATA 00 90", data, len) == 0);
-
-    status = serf_bucket_read(iobkt, 10, &data, &len);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-    CuAssertIntEquals(tc, 10, len);
-    CuAssert(tc, tgt_vecs[0].iov_base,
-             strncmp("1234567890", data, len) == 0);
-
-    for (i = 1; i < 31 ; i++) {
-        const char *exp = apr_psprintf(test_pool, "DATA %02d 901234567890", i);
-        status = serf_bucket_read(iobkt, SERF_READ_ALL_AVAIL, &data, &len);
-        CuAssertIntEquals(tc, APR_SUCCESS, status);
-        CuAssertIntEquals(tc, 20, len);
-        CuAssert(tc, data,
-                 strncmp(exp, data, len) == 0);
-
-    }
-
-    status = serf_bucket_read(iobkt, 20, &data, &len);
-    CuAssertIntEquals(tc, APR_EOF, status);
-    CuAssertIntEquals(tc, 20, len);
-    CuAssert(tc, data,
-             strncmp("DATA 31 901234567890", data, len) == 0);
-
-    /* Test 3: read an empty iovec */
-    iobkt = serf_bucket_iovec_create(vecs, 0, alloc);
-    status = serf_bucket_read_iovec(iobkt, SERF_READ_ALL_AVAIL, 32,
-                                    tgt_vecs, &vecs_used);
-    CuAssertIntEquals(tc, APR_EOF, status);
-    CuAssertIntEquals(tc, 0, vecs_used);
-
-    status = serf_bucket_read(iobkt, SERF_READ_ALL_AVAIL, &data, &len);
-    CuAssertIntEquals(tc, APR_EOF, status);
-    CuAssertIntEquals(tc, 0, len);
-
-    test_teardown(test_pool);
 }
 
 CuSuite *test_buckets(void)
@@ -489,7 +326,6 @@ CuSuite *test_buckets(void)
     SUITE_ADD_TEST(suite, test_bucket_header_set);
     SUITE_ADD_TEST(suite, test_simple_read_restore_snapshot_read);
     SUITE_ADD_TEST(suite, test_aggregate_read_restore_snapshot_read);
-    SUITE_ADD_TEST(suite, test_iovec_buckets);
 
     return suite;
 }

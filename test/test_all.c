@@ -18,6 +18,9 @@
 #include "test_serf.h"
 #include <stdlib.h>
 
+/* Top-level pool which can be used by tests. */
+apr_pool_t *test_pool;
+
 static const struct testlist {
     const char *testname;
     CuSuite *(*func)(void);
@@ -38,6 +41,8 @@ int main(int argc, char *argv[])
 
     apr_initialize();
     atexit(apr_terminate);
+
+    apr_pool_create(&test_pool, NULL);
 
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-v")) {
@@ -96,6 +101,8 @@ int main(int argc, char *argv[])
 
     CuSuiteFreeDeep(alltests);
     CuStringFree(output);
+
+    apr_pool_destroy(test_pool);
 
     return exit_code;
 }

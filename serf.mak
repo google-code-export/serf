@@ -89,9 +89,6 @@ ZLIB_LIBS = "$(ZLIB_SRC)\zlibdll.lib"
 !ENDIF
 
 
-# Use static linking to Expat library
-EXPAT_FLAGS = /D XML_STATIC
-
 # Exclude stuff we don't need from the Win32 headers
 WIN32_DEFS = /D WIN32 /D WIN32_LEAN_AND_MEAN /D NOUSER /D NOGDI /D NONLS /D NOCRYPT /D SERF_HAVE_SSPI
 
@@ -118,7 +115,6 @@ LIB32_OBJS= \
     "$(INTDIR)\file_buckets.obj" \
     "$(INTDIR)\headers_buckets.obj" \
     "$(INTDIR)\incoming.obj" \
-    "$(INTDIR)\iovec_buckets.obj" \
     "$(INTDIR)\limit_buckets.obj" \
     "$(INTDIR)\mmap_buckets.obj" \
     "$(INTDIR)\outgoing.obj" \

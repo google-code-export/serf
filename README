@@ -14,26 +14,25 @@ kept to a minimum to provide high performance operation.
 
 ----
 
-1. INSTALL
+Quick guide for the impatient
 
-1.1. SCons build system
+  (Unix)
+  % ./configure
+  % make
+  % make install
 
-### double-secret-probation info: the below.. fine. I've been testing
-### this with an installed version of scons.
+----
 
+Building serf from a Subversion checkout (non-packaged releases)
 
-### I've always built with the scons-local package. I'm not sure how
-### things look if scons is installed on the system. Here are the
-### directions for using scons-local.
+We suggest that you try out 'serfmake'.
 
-Fetch the scons-local package:
-  http://prdownloads.sourceforge.net/scons/scons-local-2.0.1.tar.gz
+ % ./serfmake --prefix=/usr/local/serf --with-apr=/usr/local/apr install
 
-Unpack this into the trunk directory (ie. scons.py should be a sibling
-of the SConstruct file).
+If you want to use the autoconf build system and are using a Subversion
+checkout, you need to run buildconf and have APR and APR-util sources handy.
 
-To build serf:
+ % ./buildconf --with-apr=/path/to/apr --with-apr-util=/path/to/apr-util
+ (By default, buildconf will look in . and ../ for apr and apr-util.)
 
-$ ./scons.py
-
-### need to demonstrate switches, prefix, etc
+Then, you can use ./configure, make, etc.

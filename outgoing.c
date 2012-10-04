@@ -30,8 +30,6 @@ static apr_status_t clean_skt(void *data)
 
     if (conn->skt) {
         status = apr_socket_close(conn->skt);
-        serf__log(SOCK_VERBOSE, __FILE__, "cleanup - closed socket 0x%x, "
-                  "status %d\n", conn->skt, status);
         conn->skt = NULL;
     }
 
@@ -73,8 +71,6 @@ static apr_status_t clean_conn(void *data)
 {
     serf_connection_t *conn = data;
 
-    serf__log(CONN_VERBOSE, __FILE__, "cleaning up connection 0x%x\n",
-              conn);
     serf_connection_close(conn);
 
     return APR_SUCCESS;
@@ -213,15 +209,12 @@ apr_status_t serf__open_connections(serf_context_t *ctx)
         else
             serv_addr = conn->address;
 
-        status = apr_socket_create(&skt, serv_addr->family,
-                                   SOCK_STREAM,
+        if ((status = apr_socket_create(&skt, serv_addr->family,
+                                        SOCK_STREAM,
 #if APR_MAJOR_VERSION > 0
-                                   APR_PROTO_TCP,
+                                        APR_PROTO_TCP,
 #endif
-                                   conn->skt_pool);
-        serf__log(SOCK_VERBOSE, __FILE__, "created socket 0x%x for conn 0x%x, "
-                  "status %d\n", skt, conn, status);
-        if (status != APR_SUCCESS)
+                                        conn->skt_pool)) != APR_SUCCESS)
             return status;
 
         /* Set the socket to be non-blocking */
@@ -239,10 +232,8 @@ apr_status_t serf__open_connections(serf_context_t *ctx)
         /* Now that the socket is set up, let's connect it. This should
          * return immediately.
          */
-        status = apr_socket_connect(skt, serv_addr);
-        serf__log(SOCK_VERBOSE, __FILE__, "connected socket 0x%x, status %d\n",
-                  skt, status);
-		if (status != APR_SUCCESS) {
+        if ((status = apr_socket_connect(skt,
+                                         serv_addr)) != APR_SUCCESS) {
             if (!APR_STATUS_IS_EINPROGRESS(status))
                 return status;
         }
@@ -280,8 +271,6 @@ static apr_status_t no_more_writes(serf_connection_t *conn,
 {
     /* Note that we should hold new requests until we open our new socket. */
     conn->state = SERF_CONN_CLOSING;
-    serf__log(CONN_VERBOSE, __FILE__, "stop writing on conn 0x%x\n",
-              conn);
 
     /* Clear our iovec. */
     conn->vec_len = 0;
@@ -430,11 +419,9 @@ static apr_status_t reset_connection(serf_connection_t *conn,
     conn->requests = NULL;
     conn->requests_tail = NULL;
 
-    /* Handle all outstanding requests. These have either not been written yet,
-       or have been written but the expected reply wasn't received yet. */
     while (old_reqs) {
         /* If we haven't started to write the connection, bring it over
-         * unchanged to our new socket.
+         * unchanged to our new socket.  Otherwise, call the cancel function.
          */
         if (requeue_requests && !old_reqs->written) {
             serf_request_t *req = old_reqs;
@@ -443,19 +430,13 @@ static apr_status_t reset_connection(serf_connection_t *conn,
             link_requests(&conn->requests, &conn->requests_tail, req);
         }
         else {
-            /* Request has been consumed, or we don't want to requeue the
-               request. Either way, inform the application that the request
-               is cancelled. */
             cancel_request(old_reqs, &old_reqs, requeue_requests);
         }
     }
 
-    /* Requests queue has been prepared for a new socket, close the old one. */
     if (conn->skt != NULL) {
         remove_connection(ctx, conn);
         status = apr_socket_close(conn->skt);
-        serf__log(SOCK_VERBOSE, __FILE__, "closed socket 0x%x, status %d\n",
-                  conn->skt, status);
         if (conn->closed != NULL) {
             handle_conn_closed(conn, status);
         }
@@ -476,8 +457,6 @@ static apr_status_t reset_connection(serf_connection_t *conn,
     conn->ctx->dirty_pollset = 1;
     conn->state = SERF_CONN_INIT;
 
-    serf__log(CONN_VERBOSE, __FILE__, "reset connection 0x%x\n", conn);
-
     conn->status = APR_SUCCESS;
 
     /* Let our context know that we've 'reset' the socket already. */
@@ -494,24 +473,15 @@ static apr_status_t socket_writev(serf_connection_t *conn)
 
     status = apr_socket_sendv(conn->skt, conn->vec,
                               conn->vec_len, &written);
-	if (status && !APR_STATUS_IS_EAGAIN(status))
-        serf__log(SOCK_VERBOSE, __FILE__, "socket_sendv 0x%x error %d\n",
-                  conn->skt, status);
 
     /* did we write everything? */
     if (written) {
         apr_size_t len = 0;
         int i;
 
-        serf__log(SOCK_MSG_VERBOSE, __FILE__, "--- socket_sendv 0x%x:\n",
-                  conn->skt);
-
         for (i = 0; i < conn->vec_len; i++) {
             len += conn->vec[i].iov_len;
             if (written < len) {
-                serf__log(SOCK_MSG_VERBOSE, 0l, "%.*s",
-                          conn->vec[i].iov_len - (len - written),
-                          conn->vec[i].iov_base);
                 if (i) {
                     memmove(conn->vec, &conn->vec[i],
                             sizeof(struct iovec) * (conn->vec_len - i));
@@ -520,15 +490,11 @@ static apr_status_t socket_writev(serf_connection_t *conn)
                 conn->vec[0].iov_base = (char *)conn->vec[0].iov_base + (conn->vec[0].iov_len - (len - written));
                 conn->vec[0].iov_len = len - written;
                 break;
-            } else {
-                serf__log(SOCK_MSG_VERBOSE, 0l, "%.*s",
-                          conn->vec[i].iov_len, conn->vec[i].iov_base);
             }
         }
         if (len == written) {
             conn->vec_len = 0;
         }
-        serf__log(SOCK_MSG_VERBOSE, 0l, "-(%d)-\n", written);
 
         /* Log progress information */
         serf__context_progress_delta(conn->ctx, 0, written);
@@ -1161,9 +1127,6 @@ serf_connection_t *serf_connection_create(
     /* Add the connection to the context. */
     *(serf_connection_t **)apr_array_push(ctx->conns) = conn;
 
-    serf__log(CONN_VERBOSE, __FILE__, "created connection 0x%x\n",
-              conn);
-
     return conn;
 }
 
@@ -1180,11 +1143,6 @@ apr_status_t serf_connection_create2(
     apr_status_t status;
     serf_connection_t *c;
     apr_sockaddr_t *host_address;
-
-    /* Set the port number explicitly, needed to create the socket later. */
-    if (!host_info.port) {
-        host_info.port = apr_uri_port_of_scheme(host_info.scheme);
-    }
 
     /* Parse the url, store the address of the server. */
     status = apr_sockaddr_info_get(&host_address,
@@ -1231,9 +1189,6 @@ apr_status_t serf_connection_close(
             if (conn->skt != NULL) {
                 remove_connection(ctx, conn);
                 status = apr_socket_close(conn->skt);
-                serf__log(SOCK_VERBOSE, __FILE__,
-                          "closed socket 0x%x, status %d\n", conn->skt,
-                          status);
                 if (conn->closed != NULL) {
                     handle_conn_closed(conn, status);
                 }
@@ -1257,9 +1212,6 @@ apr_status_t serf_connection_close(
                     (ctx->conns->nelts - i - 1) * sizeof(serf_connection_t *));
             }
             --ctx->conns->nelts;
-
-            serf__log(CONN_VERBOSE, __FILE__, "closed connection 0x%x\n",
-                      conn);
 
             /* Found the connection. Closed it. All done. */
             return APR_SUCCESS;

@@ -91,28 +91,19 @@ static apr_status_t handle_response(serf_request_t *request,
         return status;
     }
 
-    /* RFC 2817:  Any successful (2xx) response to a CONNECT request indicates
-       that the proxy has established a connection to the requested host and
-       port, and has switched to tunneling the current connection to that server
-       connection.
-    */
-    if (sl.code >= 200 && sl.code < 300) {
+    /* Body is supposed to be empty. */
+    if (sl.code == 200) {
         request->conn->state = SERF_CONN_CONNECTED;
 
-        /* Body is supposed to be empty. */
         apr_pool_destroy(ctx->pool);
         serf_bucket_destroy(request->conn->ssltunnel_ostream);
         request->conn->stream = NULL;
         ctx = NULL;
 
-        serf__log(CONN_VERBOSE, __FILE__,
-                  "successfully set up ssl tunnel on connection 0x%x\n",
-                  request->conn);
-
         return APR_EOF;
     }
 
-    /* Authentication failure and 2xx Ok are handled at this point,
+    /* Authentication failure and 200 Ok are handled at this point,
        the rest are errors. */
     return APR_EGENERAL; /* TODO: better error code */
 }
@@ -172,8 +163,6 @@ apr_status_t serf__ssltunnel_connect(serf_connection_t *conn)
                                             ctx);
 
     conn->state = SERF_CONN_SETUP_SSLTUNNEL;
-    serf__log(CONN_VERBOSE, __FILE__,
-              "setting up ssl tunnel on connection 0x%x\n", conn);
 
     return APR_SUCCESS;
 }

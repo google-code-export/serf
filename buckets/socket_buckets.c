@@ -17,7 +17,6 @@
 #include <apr_network_io.h>
 
 #include "serf.h"
-#include "serf_private.h"
 #include "serf_bucket_util.h"
 
 
@@ -41,15 +40,6 @@ static apr_status_t socket_reader(void *baton, apr_size_t bufsize,
     *len = bufsize;
     status = apr_socket_recv(ctx->skt, buf, len);
 
-    if (status && !APR_STATUS_IS_EAGAIN(status))
-        serf__log(SOCK_VERBOSE, __FILE__, "socket_recv 0x%x error %d\n",
-                  ctx->skt, status);
-
-    if (*len)
-        serf__log(SOCK_MSG_VERBOSE, __FILE__,
-                  "--- socket_recv 0x%x:\n%.*s\n-(%d)-\n",
-                  ctx->skt, *len, buf, *len);
-
     if (ctx->progress_func)
         ctx->progress_func(ctx->progress_baton, *len, 0);
 
@@ -70,8 +60,7 @@ serf_bucket_t *serf_bucket_socket_create(
     ctx->databuf.read = socket_reader;
     ctx->databuf.read_baton = ctx;
 
-    ctx->progress_func = NULL;
-    ctx->progress_baton = NULL;
+    ctx->progress_func = ctx->progress_baton = NULL;
     return serf_bucket_create(&serf_bucket_type_socket, allocator, ctx);
 }
 

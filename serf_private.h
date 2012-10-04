@@ -30,15 +30,6 @@
 #define SERF_IO_CONN (2)
 #define SERF_IO_LISTENER (3)
 
-/* Internal logging facilities, set flag to 1 to enable console logging for
-   the selected component. */
-#define SSL_VERBOSE 0	
-#define SSL_MSG_VERBOSE 0  /* logs decrypted requests and responses. */
-#define SOCK_VERBOSE 0
-#define SOCK_MSG_VERBOSE 0 /* logs bytes received from or written to a socket. */
-#define CONN_VERBOSE 0
-
-
 typedef struct serf__authn_scheme_t serf__authn_scheme_t;
 
 typedef struct serf_io_baton_t {
@@ -352,9 +343,5 @@ apr_status_t serf__conn_update_pollset(serf_connection_t *conn);
 
 /* from ssltunnel.c */
 apr_status_t serf__ssltunnel_connect(serf_connection_t *conn);
-
-/* Logging funcion. Use one of the [COMP]_VERBOSE flags to enable specific
-   logging. */
-void serf__log(int verbose_flag, const char *filename, const char *fmt, ...);
 
 #endif

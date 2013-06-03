@@ -62,7 +62,7 @@ static void print_ssl_cert_errors(int failures)
 static apr_status_t ignore_all_cert_errors(void *data, int failures,
                                            const serf_ssl_certificate_t *cert)
 {
-    print_ssl_cert_errors(failures);
+    print_ssl_cert_errors(failures);   
 
      /* In a real application, you would normally would not want to do this */
     return APR_SUCCESS;
@@ -105,7 +105,7 @@ static apr_status_t print_certs(void *data, int failures, int error_depth,
         subject = serf_ssl_cert_subject(current, pool);
         issuer = serf_ssl_cert_issuer(current, pool);
         serf_cert = serf_ssl_cert_certificate(current, pool);
-
+        
         fprintf(stderr, "\n-----BEGIN CERTIFICATE-----\n");
         fprintf(stderr, "Hostname: %s\n",
                 (const char *)apr_hash_get(subject, "CN", APR_HASH_KEY_STRING));
@@ -129,7 +129,7 @@ static apr_status_t print_certs(void *data, int failures, int error_depth,
         fprintf(stderr, "%s\n", serf_ssl_cert_export(current, pool));
         fprintf(stderr, "-----END CERTIFICATE-----\n");
         ++certs;
-    }
+    }    
 
     apr_pool_destroy(pool);
     return APR_SUCCESS;
@@ -188,7 +188,6 @@ typedef struct {
     apr_atomic_t completed_requests;
 #endif
     int print_headers;
-    apr_file_t *output_file;
 
     serf_response_acceptor_t acceptor;
     app_baton_t *acceptor_baton;
@@ -214,6 +213,8 @@ static apr_status_t handle_response(serf_request_t *request,
                                     void *handler_baton,
                                     apr_pool_t *pool)
 {
+    const char *data;
+    apr_size_t len;
     serf_status_line sl;
     apr_status_t status;
     handler_baton_t *ctx = handler_baton;
@@ -228,18 +229,12 @@ static apr_status_t handle_response(serf_request_t *request,
     }
 
     while (1) {
-        struct iovec vecs[64];
-        int vecs_read;
-        apr_size_t bytes_written;
-
-        status = serf_bucket_read_iovec(response, 8000, 64, vecs, &vecs_read);
+        status = serf_bucket_read(response, 2048, &data, &len);
         if (SERF_BUCKET_READ_ERROR(status))
             return status;
 
         /* got some data. print it out. */
-        if (vecs_read) {
-            apr_file_writev(ctx->output_file, vecs, vecs_read, &bytes_written);
-        }
+        fwrite(data, 1, len, stdout);
 
         /* are we done yet? */
         if (APR_STATUS_IS_EOF(status)) {
@@ -247,16 +242,11 @@ static apr_status_t handle_response(serf_request_t *request,
                 serf_bucket_t *hdrs;
                 hdrs = serf_bucket_response_get_headers(response);
                 while (1) {
-                    status = serf_bucket_read_iovec(hdrs, 8000, 64, vecs,
-                                                    &vecs_read);
-
+                    status = serf_bucket_read(hdrs, 2048, &data, &len);
                     if (SERF_BUCKET_READ_ERROR(status))
                         return status;
 
-                    if (vecs_read) {
-                        apr_file_writev(ctx->output_file, vecs, vecs_read,
-                                        &bytes_written);
-                    }
+                    fwrite(data, 1, len, stdout);
                     if (APR_STATUS_IS_EOF(status)) {
                         break;
                     }
@@ -338,7 +328,6 @@ static void print_usage(apr_pool_t *pool)
     puts("-v\tDisplay version");
     puts("-H\tPrint response headers");
     puts("-n <count> Fetch URL <count> times");
-    puts("-x <count> Number of maximum outstanding requests inflight");
     puts("-a <user:password> Present Basic authentication credentials");
     puts("-m <method> Use the <method> HTTP Method");
     puts("-f <file> Use the <file> as the request body");
@@ -357,7 +346,7 @@ int main(int argc, const char **argv)
     apr_uri_t url;
     const char *proxy = NULL;
     const char *raw_url, *method, *req_body_path = NULL;
-    int count, inflight;
+    int count;
     int i;
     int print_headers;
     char *authn = NULL;
@@ -371,9 +360,8 @@ int main(int argc, const char **argv)
     apr_pool_create(&pool, NULL);
     /* serf_initialize(); */
 
-    /* Default to one round of fetching with no limit to max inflight reqs. */
+    /* Default to one round of fetching. */
     count = 1;
-    inflight = 0;
     /* Default to GET. */
     method = "GET";
     /* Do not print headers by default. */
@@ -381,7 +369,7 @@ int main(int argc, const char **argv)
 
     apr_getopt_init(&opt, pool, argc, argv);
 
-    while ((status = apr_getopt(opt, "a:f:hHm:n:vp:x:", &opt_c, &opt_arg)) ==
+    while ((status = apr_getopt(opt, "a:f:hHm:n:vp:", &opt_c, &opt_arg)) ==
            APR_SUCCESS) {
         int srclen, enclen;
 
@@ -411,15 +399,6 @@ int main(int argc, const char **argv)
             count = apr_strtoi64(opt_arg, NULL, 10);
             if (errno) {
                 printf("Problem converting number of times to fetch URL (%d)\n",
-                       errno);
-                return errno;
-            }
-            break;
-        case 'x':
-            errno = 0;
-            inflight = apr_strtoi64(opt_arg, NULL, 10);
-            if (errno) {
-                printf("Problem converting number of requests to have outstanding (%d)\n",
                        errno);
                 return errno;
             }
@@ -519,7 +498,6 @@ int main(int argc, const char **argv)
 
     handler_ctx.completed_requests = 0;
     handler_ctx.print_headers = print_headers;
-    apr_file_open_stdout(&handler_ctx.output_file, pool);
 
     handler_ctx.host = url.hostinfo;
     handler_ctx.method = method;
@@ -531,8 +509,6 @@ int main(int argc, const char **argv)
     handler_ctx.acceptor = accept_response;
     handler_ctx.acceptor_baton = &app_ctx;
     handler_ctx.handler = handle_response;
-
-    serf_connection_set_max_outstanding_requests(connection, inflight);
 
     for (i = 0; i < count; i++) {
         request = serf_connection_request_create(connection, setup_request,

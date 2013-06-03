@@ -45,12 +45,10 @@ CuSuite *getsuite(void);
 CuSuite *test_context(void);
 CuSuite *test_buckets(void);
 CuSuite *test_ssl(void);
-CuSuite *test_mock_bucket(void);
 
 /* Test setup declarations */
+
 #define CRLF "\r\n"
-#define CR "\r"
-#define LF "\n"
 
 #define CHUNKED_REQUEST(len, body)\
         "GET / HTTP/1.1" CRLF\
@@ -95,10 +93,6 @@ typedef struct {
     /* An extra baton which can be freely used by tests. */
     void *user_baton;
 
-    /* Flags that can be used to report situations, e.g. that a callback was
-       called. */
-    int result_flags;
-
     apr_array_header_t *accepted_requests, *handled_requests, *sent_requests;
 
     serf_ssl_context_t *ssl_context;
@@ -119,19 +113,18 @@ apr_status_t test_https_server_setup(test_baton_t **tb_p,
                                      apr_int32_t options,
                                      serf_connection_setup_t conn_setup,
                                      const char *keyfile,
-                                     const char **certfile,
-                                     const char *client_cn,
+                                     const char *certfile,
                                      serf_ssl_need_server_cert_t server_cert_cb,
                                      apr_pool_t *pool);
 
-apr_status_t test_http_server_setup(test_baton_t **tb_p,
-                                    test_server_message_t *message_list,
-                                    apr_size_t message_count,
-                                    test_server_action_t *action_list,
-                                    apr_size_t action_count,
-                                    apr_int32_t options,
-                                    serf_connection_setup_t conn_setup,
-                                    apr_pool_t *pool);
+apr_status_t test_server_setup(test_baton_t **tb_p,
+                               test_server_message_t *message_list,
+                               apr_size_t message_count,
+                               test_server_action_t *action_list,
+                               apr_size_t action_count,
+                               apr_int32_t options,
+                               serf_connection_setup_t conn_setup,
+                               apr_pool_t *pool);
 
 apr_status_t test_server_proxy_setup(
                  test_baton_t **tb_p,
@@ -147,29 +140,9 @@ apr_status_t test_server_proxy_setup(
                  serf_connection_setup_t conn_setup,
                  apr_pool_t *pool);
 
-void *test_setup(void *baton);
-void *test_teardown(void *baton);
+apr_status_t test_server_teardown(test_baton_t *tb, apr_pool_t *pool);
 
-/* Mock bucket type and constructor */
-typedef struct {
-    int times;
-    const char *data;
-    apr_status_t status;
-} mockbkt_action;
-
-void read_and_check_bucket(CuTest *tc, serf_bucket_t *bkt,
-                           const char *expected);
-void readlines_and_check_bucket(CuTest *tc, serf_bucket_t *bkt,
-                                int acceptable,
-                                const char *expected,
-                                int expected_nr_of_lines);
-
-extern const serf_bucket_type_t serf_bucket_type_mock;
-#define SERF_BUCKET_IS_MOCK(b) SERF_BUCKET_CHECK((b), mock)
-
-serf_bucket_t *serf_bucket_mock_create(mockbkt_action *actions,
-                                       int len,
-                                       serf_bucket_alloc_t *allocator);
-apr_status_t serf_bucket_mock_more_data_arrived(serf_bucket_t *bucket);
+apr_pool_t *test_setup(void);
+void test_teardown(apr_pool_t *test_pool);
 
 #endif /* TEST_SERF_H */

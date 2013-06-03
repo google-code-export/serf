@@ -23,7 +23,10 @@
  *
  * Originally obtained from "http://cutest.sourceforge.net/" version 1.4.
  *
- * See CuTest.h for a list of serf-specific modifications.
+ * Modified for serf as follows
+ *    1) added CuStringFree(), CuTestFree(), CuSuiteFree(), and
+ *       CuSuiteFreeDeep()
+ *    0) reformatted the whitespace (doh!)
  */
 #include <assert.h>
 #include <setjmp.h>
@@ -162,16 +165,11 @@ void CuTestRun(CuTest* tc)
 {
     jmp_buf buf;
     tc->jumpBuf = &buf;
-    if (tc->setup)
-        tc->testBaton = tc->setup(tc);
     if (setjmp(buf) == 0)
     {
         tc->ran = 1;
         (tc->function)(tc);
     }
-    if (tc->teardown)
-        tc->teardown(tc->testBaton);
-
     tc->jumpBuf = 0;
 }
 
@@ -236,26 +234,8 @@ void CuAssertStrnEquals_LineMsg(CuTest* tc, const char* file, int line, const ch
 void CuAssertStrEquals_LineMsg(CuTest* tc, const char* file, int line, const char* message,
     const char* expected, const char* actual)
 {
-    CuString string;
-    if ((expected == NULL && actual == NULL) ||
-        (expected != NULL && actual != NULL &&
-         strcmp(expected, actual) == 0))
-    {
-        return;
-    }
-
-    CuStringInit(&string);
-    if (message != NULL)
-    {
-        CuStringAppend(&string, message);
-        CuStringAppend(&string, ": ");
-    }
-    CuStringAppend(&string, "expected <");
-    CuStringAppend(&string, expected);
-    CuStringAppend(&string, "> but was <");
-    CuStringAppend(&string, actual);
-    CuStringAppend(&string, ">");
-    CuFailInternal(tc, file, line, &string);}
+    CuAssertStrnEquals_LineMsg(tc, file, line, message, expected, strlen(expected), actual);
+}
 
 void CuAssertIntEquals_LineMsg(CuTest* tc, const char* file, int line, const char* message,
     int expected, int actual)
@@ -293,8 +273,6 @@ void CuSuiteInit(CuSuite* testSuite)
 {
     testSuite->count = 0;
     testSuite->failCount = 0;
-    testSuite->setup = NULL;
-    testSuite->teardown = NULL;
 }
 
 CuSuite* CuSuiteNew(void)
@@ -325,13 +303,6 @@ void CuSuiteAdd(CuSuite* testSuite, CuTest *testCase)
     assert(testSuite->count < MAX_TEST_CASES);
     testSuite->list[testSuite->count] = testCase;
     testSuite->count++;
-
-    /* CuSuiteAdd is called twice per test, don't reset the callbacks if
-       already set. */
-    if (!testCase->setup)
-        testCase->setup = testSuite->setup;
-    if (!testCase->teardown)
-        testCase->teardown = testSuite->teardown;
 }
 
 void CuSuiteAddSuite(CuSuite* testSuite, CuSuite* testSuite2)
@@ -400,11 +371,4 @@ void CuSuiteDetails(CuSuite* testSuite, CuString* details)
         CuStringAppendFormat(details, "Passes: %d ", testSuite->count - testSuite->failCount);
         CuStringAppendFormat(details, "Fails: %d\n",  testSuite->failCount);
     }
-}
-
-void CuSuiteSetSetupTeardownCallbacks(CuSuite* testSuite, TestCallback setup,
-                                      TestCallback teardown)
-{
-    testSuite->setup = setup;
-    testSuite->teardown = teardown;
 }

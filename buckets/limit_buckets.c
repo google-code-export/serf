@@ -17,7 +17,14 @@
 
 #include "serf.h"
 #include "serf_bucket_util.h"
-#include "serf_private.h"
+
+/* Older versions of APR do not have this macro.  */
+#ifdef APR_SIZE_MAX
+#define REQUESTED_MAX APR_SIZE_MAX
+#else
+#define REQUESTED_MAX (~((apr_size_t)0))
+#endif
+
 
 typedef struct {
     serf_bucket_t *stream;

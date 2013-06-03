@@ -240,7 +240,7 @@ apr_status_t serf__open_connections(serf_context_t *ctx)
         serf__log_skt(SOCK_VERBOSE, __FILE__, skt,
                       "connected socket for conn 0x%x, status %d\n",
                       conn, status);
-        if (status != APR_SUCCESS) {
+		if (status != APR_SUCCESS) {
             if (!APR_STATUS_IS_EINPROGRESS(status))
                 return status;
         }
@@ -492,7 +492,7 @@ static apr_status_t socket_writev(serf_connection_t *conn)
 
     status = apr_socket_sendv(conn->skt, conn->vec,
                               conn->vec_len, &written);
-    if (status && !APR_STATUS_IS_EAGAIN(status))
+	if (status && !APR_STATUS_IS_EAGAIN(status))
         serf__log_skt(SOCK_VERBOSE, __FILE__, conn->skt,
                       "socket_sendv error %d\n", status);
 
@@ -743,10 +743,6 @@ static apr_status_t write_to_connection(serf_connection_t *conn)
         }
 
         /* ### optimize at some point by using read_for_sendfile */
-        /* TODO: now that read_iovec will effectively try to return as much
-           data as available, we probably don't want to read ALL_AVAIL, but
-           a lower number, like the size of one or a few TCP packets, the
-           available TCP buffer size ... */
         read_status = serf_bucket_read_iovec(ostreamh,
                                              SERF_READ_ALL_AVAIL,
                                              IOV_MAX,
@@ -1184,8 +1180,7 @@ serf_connection_t *serf_connection_create(
     apr_pool_create(&conn->skt_pool, conn->pool);
 
     /* register a cleanup */
-    apr_pool_cleanup_register(conn->pool, conn, clean_conn,
-                              apr_pool_cleanup_null);
+    apr_pool_cleanup_register(conn->pool, conn, clean_conn, apr_pool_cleanup_null);
 
     /* Add the connection to the context. */
     *(serf_connection_t **)apr_array_push(ctx->conns) = conn;

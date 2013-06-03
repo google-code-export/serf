@@ -38,18 +38,10 @@ typedef struct {
 
     const char *method;
     const char *path;
-    /* Use this for a raw request message */
-    const char *request;
     int done;
 
     test_baton_t *tb;
 } handler_baton_t;
-
-/* These defines are used with the test_baton_t result_flags variable. */
-#define TEST_RESULT_SERVERCERTCB_CALLED      0x0001
-#define TEST_RESULT_SERVERCERTCHAINCB_CALLED 0x0002
-#define TEST_RESULT_CLIENT_CERTCB_CALLED     0x0004
-#define TEST_RESULT_CLIENT_CERTPWCB_CALLED   0x0008
 
 /* Helper function, runs the client and server context loops and validates
    that no errors were encountered, and all messages were sent and received. */
@@ -69,7 +61,7 @@ test_helper_run_requests_no_check(CuTest *tc, test_baton_t *tb,
     {
         apr_pool_clear(iter_pool);
 
-        status = run_test_server(tb->serv_ctx, 0, iter_pool);
+        status = test_server_run(tb->serv_ctx, 0, iter_pool);
         if (!APR_STATUS_IS_TIMEUP(status) &&
             SERF_BUCKET_READ_ERROR(status))
             return status;
@@ -138,26 +130,15 @@ static apr_status_t setup_request(serf_request_t *request,
     handler_baton_t *ctx = setup_baton;
     serf_bucket_t *body_bkt;
 
-    if (ctx->request)
-    {
-        /* Create a raw request bucket. */
-        *req_bkt = serf_bucket_simple_create(ctx->request, strlen(ctx->request),
-                                             NULL, NULL,
-                                             serf_request_get_alloc(request));
-    }
-    else
-    {
-        /* create a simple body text */
-        const char *str = apr_psprintf(pool, "%d", ctx->req_id);
-
-        body_bkt = serf_bucket_simple_create(str, strlen(str), NULL, NULL,
-                                             serf_request_get_alloc(request));
-        *req_bkt =
-            serf_request_bucket_request_create(request,
-                                               ctx->method, ctx->path,
-                                               body_bkt,
-                                               serf_request_get_alloc(request));
-    }
+    /* create a simple body text */
+    const char *str = apr_psprintf(pool, "%d", ctx->req_id);
+    body_bkt = serf_bucket_simple_create(str, strlen(str), NULL, NULL,
+                                         serf_request_get_alloc(request));
+    *req_bkt = 
+        serf_request_bucket_request_create(request, 
+                                           ctx->method, ctx->path, 
+                                           body_bkt,
+                                           serf_request_get_alloc(request));
 
     APR_ARRAY_PUSH(ctx->sent_requests, int) = ctx->req_id;
 
@@ -224,7 +205,6 @@ static void setup_handler(test_baton_t *tb, handler_baton_t *handler_ctx,
     handler_ctx->sent_requests = tb->sent_requests;
     handler_ctx->handled_requests = tb->handled_requests;
     handler_ctx->tb = tb;
-    handler_ctx->request = NULL;
 }
 
 static void create_new_prio_request(test_baton_t *tb,
@@ -280,13 +260,13 @@ static void test_serf_connection_request_create(CuTest *tc)
         {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
     };
 
-    apr_pool_t *test_pool = tc->testBaton;
+    apr_pool_t *test_pool = test_setup();
 
     /* Set up a test context with a server */
-    status = test_http_server_setup(&tb,
-                                    message_list, num_requests,
-                                    action_list, num_requests, 0, NULL,
-                                    test_pool);
+    status = test_server_setup(&tb,
+                               message_list, num_requests,
+                               action_list, num_requests, 0, NULL,
+                               test_pool);
     CuAssertIntEquals(tc, APR_SUCCESS, status);
 
     create_new_request(tb, &handler_ctx[0], "GET", "/", 1);
@@ -306,6 +286,9 @@ static void test_serf_connection_request_create(CuTest *tc)
         int req_nr = APR_ARRAY_IDX(tb->handled_requests, i, int);
         CuAssertIntEquals(tc, i + 1, req_nr);
     }
+
+    test_server_teardown(tb, test_pool);
+    test_teardown(test_pool);
 }
 
 /* Validate that priority requests are sent and completed before normal
@@ -330,13 +313,13 @@ static void test_serf_connection_priority_request_create(CuTest *tc)
         {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
     };
 
-    apr_pool_t *test_pool = tc->testBaton;
+    apr_pool_t *test_pool = test_setup();
 
     /* Set up a test context with a server */
-    status = test_http_server_setup(&tb,
-                                    message_list, num_requests,
-                                    action_list, num_requests, 0, NULL,
-                                    test_pool);
+    status = test_server_setup(&tb,
+                               message_list, num_requests,
+                               action_list, num_requests, 0, NULL,
+                               test_pool);
     CuAssertIntEquals(tc, APR_SUCCESS, status);
 
     create_new_request(tb, &handler_ctx[0], "GET", "/", 2);
@@ -357,6 +340,9 @@ static void test_serf_connection_priority_request_create(CuTest *tc)
         int req_nr = APR_ARRAY_IDX(tb->handled_requests, i, int);
         CuAssertIntEquals(tc, i + 1, req_nr);
     }
+
+    test_server_teardown(tb, test_pool);
+    test_teardown(test_pool);
 }
 
 /* Test that serf correctly handles the 'Connection:close' header when the
@@ -411,15 +397,15 @@ static void test_serf_closed_connection(CuTest *tc)
         {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
     };
 
-    apr_pool_t *test_pool = tc->testBaton;
+    apr_pool_t *test_pool = test_setup();
 
     /* Set up a test context with a server. */
-    status = test_http_server_setup(&tb,
-                                    message_list, num_requests,
-                                    action_list, 12,
-                                    0,
-                                    NULL,
-                                    test_pool);
+    status = test_server_setup(&tb,
+                               message_list, num_requests,
+                               action_list, 12,
+                               0,
+                               NULL,
+                               test_pool);
     CuAssertIntEquals(tc, APR_SUCCESS, status);
 
     /* Send some requests on the connections */
@@ -428,7 +414,7 @@ static void test_serf_closed_connection(CuTest *tc)
     }
 
     while (1) {
-        status = run_test_server(tb->serv_ctx, 0, test_pool);
+        status = test_server_run(tb->serv_ctx, 0, test_pool);
         if (APR_STATUS_IS_TIMEUP(status))
             status = APR_SUCCESS;
         CuAssertIntEquals(tc, APR_SUCCESS, status);
@@ -455,6 +441,10 @@ static void test_serf_closed_connection(CuTest *tc)
    CuAssertTrue(tc, tb->sent_requests->nelts >= num_requests);
    CuAssertIntEquals(tc, num_requests, tb->accepted_requests->nelts);
    CuAssertIntEquals(tc, num_requests, tb->handled_requests->nelts);
+
+    /* Cleanup */
+    test_server_teardown(tb, test_pool);
+    test_teardown(test_pool);
 }
 
 /* Test if serf is sending the request to the proxy, not to the server
@@ -483,7 +473,7 @@ static void test_serf_setup_proxy(CuTest *tc)
         {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
     };
 
-    apr_pool_t *test_pool = tc->testBaton;
+    apr_pool_t *test_pool = test_setup();
 
     /* Set up a test context with a server, no messages expected. */
     status = test_server_proxy_setup(&tb,
@@ -505,12 +495,12 @@ static void test_serf_setup_proxy(CuTest *tc)
     {
         apr_pool_clear(iter_pool);
 
-        status = run_test_server(tb->serv_ctx, 0, iter_pool);
+        status = test_server_run(tb->serv_ctx, 0, iter_pool);
         if (APR_STATUS_IS_TIMEUP(status))
             status = APR_SUCCESS;
         CuAssertIntEquals(tc, APR_SUCCESS, status);
 
-        status = run_test_server(tb->proxy_ctx, 0, iter_pool);
+        status = test_server_run(tb->proxy_ctx, 0, iter_pool);
         if (APR_STATUS_IS_TIMEUP(status))
             status = APR_SUCCESS;
         CuAssertIntEquals(tc, APR_SUCCESS, status);
@@ -542,6 +532,9 @@ static void test_serf_setup_proxy(CuTest *tc)
         int req_nr = APR_ARRAY_IDX(tb->handled_requests, i, int);
         CuAssertIntEquals(tc, i + 1, req_nr);
     }
+
+    test_server_teardown(tb, test_pool);
+    test_teardown(test_pool);
 }
 
 /*****************************************************************************
@@ -618,13 +611,13 @@ static void test_keepalive_limit_one_by_one(CuTest *tc)
         {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
     };
 
-    apr_pool_t *test_pool = tc->testBaton;
+    apr_pool_t *test_pool = test_setup();
 
     /* Set up a test context with a server. */
-    status = test_http_server_setup(&tb,
-                                    message_list, RCVD_REQUESTS,
-                                    action_list, RCVD_REQUESTS, 0, NULL,
-                                    test_pool);
+    status = test_server_setup(&tb,
+                               message_list, RCVD_REQUESTS,
+                               action_list, RCVD_REQUESTS, 0, NULL,
+                               test_pool);
     CuAssertIntEquals(tc, APR_SUCCESS, status);
 
     for (i = 0 ; i < SEND_REQUESTS ; i++) {
@@ -635,7 +628,7 @@ static void test_keepalive_limit_one_by_one(CuTest *tc)
     }
 
     while (1) {
-        status = run_test_server(tb->serv_ctx, 0, test_pool);
+        status = test_server_run(tb->serv_ctx, 0, test_pool);
         if (APR_STATUS_IS_TIMEUP(status))
             status = APR_SUCCESS;
         CuAssertIntEquals(tc, APR_SUCCESS, status);
@@ -662,6 +655,10 @@ static void test_keepalive_limit_one_by_one(CuTest *tc)
     CuAssertIntEquals(tc, RCVD_REQUESTS, tb->sent_requests->nelts);
     CuAssertIntEquals(tc, RCVD_REQUESTS, tb->accepted_requests->nelts);
     CuAssertIntEquals(tc, RCVD_REQUESTS, tb->handled_requests->nelts);
+
+    /* Cleanup */
+    test_server_teardown(tb, test_pool);
+    test_teardown(test_pool);
 }
 #undef SEND_REQUESTS
 #undef RCVD_REQUESTS
@@ -749,13 +746,13 @@ static void test_keepalive_limit_one_by_one_and_burst(CuTest *tc)
         {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
     };
 
-    apr_pool_t *test_pool = tc->testBaton;
+    apr_pool_t *test_pool = test_setup();
 
     /* Set up a test context with a server. */
-    status = test_http_server_setup(&tb,
-                                    message_list, RCVD_REQUESTS,
-                                    action_list, RCVD_REQUESTS, 0, NULL,
-                                    test_pool);
+    status = test_server_setup(&tb,
+                               message_list, RCVD_REQUESTS,
+                               action_list, RCVD_REQUESTS, 0, NULL,
+                               test_pool);
     CuAssertIntEquals(tc, APR_SUCCESS, status);
 
     for (i = 0 ; i < SEND_REQUESTS ; i++) {
@@ -765,7 +762,7 @@ static void test_keepalive_limit_one_by_one_and_burst(CuTest *tc)
     }
 
     while (1) {
-        status = run_test_server(tb->serv_ctx, 0, test_pool);
+        status = test_server_run(tb->serv_ctx, 0, test_pool);
         if (APR_STATUS_IS_TIMEUP(status))
             status = APR_SUCCESS;
         CuAssertIntEquals(tc, APR_SUCCESS, status);
@@ -792,6 +789,10 @@ static void test_keepalive_limit_one_by_one_and_burst(CuTest *tc)
     CuAssertIntEquals(tc, RCVD_REQUESTS, tb->sent_requests->nelts);
     CuAssertIntEquals(tc, RCVD_REQUESTS, tb->accepted_requests->nelts);
     CuAssertIntEquals(tc, RCVD_REQUESTS, tb->handled_requests->nelts);
+
+    /* Cleanup */
+    test_server_teardown(tb, test_pool);
+    test_teardown(test_pool);
 }
 #undef SEND_REQUESTS
 #undef RCVD_REQUESTS
@@ -847,13 +848,13 @@ static void test_serf_progress_callback(CuTest *tc)
         {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
     };
 
-    apr_pool_t *test_pool = tc->testBaton;
+    apr_pool_t *test_pool = test_setup();
     
     /* Set up a test context with a server. */
-    status = test_http_server_setup(&tb,
-                                    message_list, num_requests,
-                                    action_list, num_requests, 0,
-                                    progress_conn_setup, test_pool);
+    status = test_server_setup(&tb,
+                               message_list, num_requests,
+                               action_list, num_requests, 0,
+                               progress_conn_setup, test_pool);
     CuAssertIntEquals(tc, APR_SUCCESS, status);
 
     /* Set up the progress callback. */
@@ -872,6 +873,10 @@ static void test_serf_progress_callback(CuTest *tc)
     /* Check that progress was reported. */
     CuAssertTrue(tc, pb->written > 0);
     CuAssertTrue(tc, pb->read > 0);
+
+    /* Cleanup */
+    test_server_teardown(tb, test_pool);
+    test_teardown(test_pool);
 }
 
 
@@ -978,7 +983,7 @@ static apr_status_t handle_response_timeout(
     }
 
     if (serf_request_is_written(request) != APR_EBUSY) {
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
+        return APR_EGENERAL;
     }
 
 
@@ -1026,13 +1031,13 @@ static void test_serf_request_timeout(CuTest *tc)
         {SERVER_RESPOND, RESPONSE_408},
     };
 
-    apr_pool_t *test_pool = tc->testBaton;
+    apr_pool_t *test_pool = test_setup();
 
     /* Set up a test context with a server. */
-    status = test_http_server_setup(&tb,
-                                    message_list, 2,
-                                    action_list, 1, 0,
-                                    NULL, test_pool);
+    status = test_server_setup(&tb,
+                               message_list, 2,
+                               action_list, 1, 0,
+                               NULL, test_pool);
     CuAssertIntEquals(tc, APR_SUCCESS, status);
 
     /* Send some requests on the connection */
@@ -1055,297 +1060,40 @@ static void test_serf_request_timeout(CuTest *tc)
 
     test_helper_run_requests_expect_ok(tc, tb, num_requests, handler_ctx,
                                        test_pool);
-}
 
-static const char *create_large_response_message(apr_pool_t *pool)
-{
-    const char *response = "HTTP/1.1 200 OK" CRLF
-                     "Transfer-Encoding: chunked" CRLF
-                     CRLF;
-    struct iovec vecs[500];
-    const int num_vecs = 500;
-    int i, j;
-    apr_size_t len;
-
-    vecs[0].iov_base = (char *)response;
-    vecs[0].iov_len = strlen(response);
-
-    for (i = 1; i < num_vecs; i++)
-    {
-        int chunk_len = 10 * i * 3;
-        char *chunk;
-        char *buf;
-
-        /* end with empty chunk */
-        if (i == num_vecs - 1)
-            chunk_len = 0;
-
-        buf = apr_pcalloc(pool, chunk_len + 1);
-        for (j = 0; j < chunk_len; j += 10)
-            memcpy(buf + j, "0123456789", 10);
-
-        chunk = apr_pstrcat(pool,
-                            apr_psprintf(pool, "%x", chunk_len),
-                            CRLF, buf, CRLF, NULL);
-        vecs[i].iov_base = chunk;
-        vecs[i].iov_len = strlen(chunk);
-    }
-
-    return apr_pstrcatv(pool, vecs, num_vecs, &len);
-}
-
-/* Validate reading a large chunked response. */
-static void test_serf_connection_large_response(CuTest *tc)
-{
-    test_baton_t *tb;
-    handler_baton_t handler_ctx[1];
-    const int num_requests = sizeof(handler_ctx)/sizeof(handler_ctx[0]);
-    apr_status_t status;
-    test_server_message_t message_list[] = {
-        {CHUNKED_REQUEST(1, "1")},
-    };
-    test_server_action_t action_list[1];
-
-    apr_pool_t *test_pool = tc->testBaton;
-
-    /* create large chunked response message */
-    const char *response = create_large_response_message(test_pool);
-    action_list[0].kind = SERVER_RESPOND;
-    action_list[0].text = response;
-
-    /* Set up a test context with a server */
-    status = test_http_server_setup(&tb,
-                                    message_list, num_requests,
-                                    action_list, num_requests, 0, NULL,
-                                    test_pool);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-
-    create_new_request(tb, &handler_ctx[0], "GET", "/", 1);
-
-    test_helper_run_requests_expect_ok(tc, tb, num_requests, handler_ctx,
-                                       test_pool);
-}
-
-static const char *create_large_request_message(apr_pool_t *pool)
-{
-    const char *request = "GET / HTTP/1.1" CRLF
-                          "Host: localhost:12345" CRLF
-                          "Transfer-Encoding: chunked" CRLF
-                          CRLF;
-    struct iovec vecs[500];
-    const int num_vecs = 500;
-    int i, j;
-    apr_size_t len;
-
-    vecs[0].iov_base = (char *)request;
-    vecs[0].iov_len = strlen(request);
-
-    for (i = 1; i < num_vecs; i++)
-    {
-        int chunk_len = 10 * i * 3;
-        char *chunk;
-        char *buf;
-
-        /* end with empty chunk */
-        if (i == num_vecs - 1)
-            chunk_len = 0;
-
-        buf = apr_pcalloc(pool, chunk_len + 1);
-        for (j = 0; j < chunk_len; j += 10)
-            memcpy(buf + j, "0123456789", 10);
-
-        chunk = apr_pstrcat(pool,
-                            apr_psprintf(pool, "%x", chunk_len),
-                            CRLF, buf, CRLF, NULL);
-        vecs[i].iov_base = chunk;
-        vecs[i].iov_len = strlen(chunk);
-    }
-
-    return apr_pstrcatv(pool, vecs, num_vecs, &len);
-}
-
-/* Validate sending a large chunked response. */
-static void test_serf_connection_large_request(CuTest *tc)
-{
-    test_baton_t *tb;
-    handler_baton_t handler_ctx[1];
-    const int num_requests = sizeof(handler_ctx)/sizeof(handler_ctx[0]);
-    test_server_message_t message_list[1];
-    test_server_action_t action_list[] = {
-        {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
-    };
-    const char *request;
-    apr_status_t status;
-
-    apr_pool_t *test_pool = tc->testBaton;
-
-    /* Set up a test context with a server */
-    status = test_http_server_setup(&tb,
-                                    message_list, num_requests,
-                                    action_list, num_requests, 0, NULL,
-                                    test_pool);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-
-    /* create large chunked request message */
-    request = create_large_request_message(test_pool);
-    message_list[0].text = request;
-
-    create_new_request(tb, &handler_ctx[0], "GET", "/", 1);
-    handler_ctx[0].request = request;
-
-    test_helper_run_requests_expect_ok(tc, tb, num_requests, handler_ctx,
-                                       test_pool);
-}
-
-/*****************************************************************************
- * SSL handshake tests
- *****************************************************************************/
-static const char *server_certs[] = {
-    "test/server/serfservercert.pem",
-    "test/server/serfcacert.pem",
-    NULL };
-
-static const char *all_server_certs[] = {
-    "test/server/serfservercert.pem",
-    "test/server/serfcacert.pem",
-    "test/server/serfrootcacert.pem",
-    NULL };
-
-static apr_status_t validate_servercert(const serf_ssl_certificate_t *cert,
-                                        apr_pool_t *pool)
-{
-    apr_hash_t *subject;
-    subject = serf_ssl_cert_subject(cert, pool);
-    if (strcmp("localhost",
-               apr_hash_get(subject, "CN", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("Test Suite Server",
-               apr_hash_get(subject, "OU", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("In Serf we trust, Inc.",
-               apr_hash_get(subject, "O", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("Mechelen",
-               apr_hash_get(subject, "L", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("Antwerp",
-               apr_hash_get(subject, "ST", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("BE",
-               apr_hash_get(subject, "C", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("serfserver@example.com",
-               apr_hash_get(subject, "E", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-
-    return APR_SUCCESS;
-}
-
-static apr_status_t validate_cacert(const serf_ssl_certificate_t *cert,
-                                    apr_pool_t *pool)
-{
-    apr_hash_t *subject;
-    subject = serf_ssl_cert_subject(cert, pool);
-    if (strcmp("Serf CA",
-               apr_hash_get(subject, "CN", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("Test Suite CA",
-               apr_hash_get(subject, "OU", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("In Serf we trust, Inc.",
-               apr_hash_get(subject, "O", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("Mechelen",
-               apr_hash_get(subject, "L", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("Antwerp",
-               apr_hash_get(subject, "ST", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("BE",
-               apr_hash_get(subject, "C", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("serfca@example.com",
-               apr_hash_get(subject, "E", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-
-    return APR_SUCCESS;
-}
-
-static apr_status_t validate_rootcacert(const serf_ssl_certificate_t *cert,
-                                        apr_pool_t *pool)
-{
-    apr_hash_t *subject;
-    subject = serf_ssl_cert_subject(cert, pool);
-    if (strcmp("Serf Root CA",
-               apr_hash_get(subject, "CN", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("Test Suite Root CA",
-               apr_hash_get(subject, "OU", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("In Serf we trust, Inc.",
-               apr_hash_get(subject, "O", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("Mechelen",
-               apr_hash_get(subject, "L", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("Antwerp",
-               apr_hash_get(subject, "ST", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("BE",
-               apr_hash_get(subject, "C", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-    if (strcmp("serfrootca@example.com",
-               apr_hash_get(subject, "E", APR_HASH_KEY_STRING)) != 0)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-
-    return APR_SUCCESS;
+    /* Cleanup */
+    test_server_teardown(tb, test_pool);
+    test_teardown(test_pool);
 }
 
 static apr_status_t
 ssl_server_cert_cb_expect_failures(void *baton, int failures,
                                    const serf_ssl_certificate_t *cert)
 {
-    test_baton_t *tb = baton;
-    int expected_failures = *(int *)tb->user_baton;
-
-    tb->result_flags |= TEST_RESULT_SERVERCERTCB_CALLED;
-
     /* We expect an error from the certificate validation function. */
-    if (failures & expected_failures)
+    if (failures)
         return APR_SUCCESS;
     else
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
+        return APR_EGENERAL;
 }
 
 static apr_status_t
 ssl_server_cert_cb_expect_allok(void *baton, int failures,
                                 const serf_ssl_certificate_t *cert)
 {
-    test_baton_t *tb = baton;
-    tb->result_flags |= TEST_RESULT_SERVERCERTCB_CALLED;
-
     /* No error expected, certificate is valid. */
     if (failures)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
+        return APR_EGENERAL;
     else
         return APR_SUCCESS;
 }
 
-static apr_status_t
-ssl_server_cert_cb_reject(void *baton, int failures,
-                          const serf_ssl_certificate_t *cert)
-{
-    return SERF_ERROR_ISSUE_IN_TESTSUITE;
-}
-
-/* Validate that we can connect successfully to an https server. This
-   certificate is not trusted, so a cert validation failure is expected. */
+/* Validate that we can connect successfully to an https server. */
 static void test_serf_ssl_handshake(CuTest *tc)
 {
     test_baton_t *tb;
     handler_baton_t handler_ctx[1];
     const int num_requests = sizeof(handler_ctx)/sizeof(handler_ctx[0]);
-    int expected_failures;
     apr_status_t status;
     test_server_message_t message_list[] = {
         {CHUNKED_REQUEST(1, "1")},
@@ -1354,39 +1102,29 @@ static void test_serf_ssl_handshake(CuTest *tc)
     test_server_action_t action_list[] = {
         {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
     };
-    static const char *server_cert[] = { "test/server/serfservercert.pem",
-        NULL };
 
 
     /* Set up a test context with a server */
-    apr_pool_t *test_pool = tc->testBaton;
-
+    apr_pool_t *test_pool = test_setup();
     status = test_https_server_setup(&tb,
                                      message_list, num_requests,
                                      action_list, num_requests, 0,
                                      NULL, /* default conn setup */
                                      "test/server/serfserverkey.pem",
-                                     server_cert,
-                                     NULL, /* no client cert */
+                                     "test/server/serfservercert.pem",
                                      ssl_server_cert_cb_expect_failures,
                                      test_pool);
     CuAssertIntEquals(tc, APR_SUCCESS, status);
-
-    /* This unknown failures is X509_V_ERR_UNABLE_TO_VERIFY_LEAF_SIGNATURE, 
-       meaning the chain has only the server cert. A good candidate for its
-       own failure code. */
-    expected_failures = SERF_SSL_CERT_UNKNOWNCA |
-                        SERF_SSL_CERT_UNKNOWN_FAILURE;
-    tb->user_baton = &expected_failures;
 
     create_new_request(tb, &handler_ctx[0], "GET", "/", 1);
 
     test_helper_run_requests_expect_ok(tc, tb, num_requests, handler_ctx,
                                        test_pool);
+
+    test_server_teardown(tb, test_pool);
+    test_teardown(test_pool);
 }
 
-/* Set up the ssl context with the CA and root CA certificates needed for
-   successful valiation of the server certificate. */
 static apr_status_t
 https_set_root_ca_conn_setup(apr_socket_t *skt,
                              serf_bucket_t **input_bkt,
@@ -1394,12 +1132,20 @@ https_set_root_ca_conn_setup(apr_socket_t *skt,
                              void *setup_baton,
                              apr_pool_t *pool)
 {
-    serf_ssl_certificate_t *rootcacert;
+    serf_ssl_certificate_t *cacert, *rootcacert;
     test_baton_t *tb = setup_baton;
     apr_status_t status;
 
     status = default_https_conn_setup(skt, input_bkt, output_bkt,
                                       setup_baton, pool);
+    if (status)
+        return status;
+
+    status = serf_ssl_load_cert_file(&cacert, "test/server/serfcacert.pem",
+                                     pool);
+    if (status)
+        return status;
+    status = serf_ssl_trust_cert(tb->ssl_context, cacert);
     if (status)
         return status;
 
@@ -1432,14 +1178,13 @@ static void test_serf_ssl_trust_rootca(CuTest *tc)
     };
 
     /* Set up a test context with a server */
-    apr_pool_t *test_pool = tc->testBaton;
+    apr_pool_t *test_pool = test_setup();
     status = test_https_server_setup(&tb,
                                      message_list, num_requests,
                                      action_list, num_requests, 0,
                                      https_set_root_ca_conn_setup,
                                      "test/server/serfserverkey.pem",
-                                     server_certs,
-                                     NULL, /* no client cert */
+                                     "test/server/serfservercert.pem",
                                      ssl_server_cert_cb_expect_allok,
                                      test_pool);
     CuAssertIntEquals(tc, APR_SUCCESS, status);
@@ -1448,6 +1193,9 @@ static void test_serf_ssl_trust_rootca(CuTest *tc)
 
     test_helper_run_requests_expect_ok(tc, tb, num_requests, handler_ctx,
                                        test_pool);
+
+    test_server_teardown(tb, test_pool);
+    test_teardown(test_pool);
 }
 
 /* Validate that when the application rejects the cert, the context loop
@@ -1467,17 +1215,17 @@ static void test_serf_ssl_application_rejects_cert(CuTest *tc)
     };
 
     /* Set up a test context with a server */
-    apr_pool_t *test_pool = tc->testBaton;
+    apr_pool_t *test_pool = test_setup();
 
-    /* The certificate is valid, but we tell serf to reject it. */
+    /* The certificate is valid, but we tell serf to reject it by using the
+       ssl_server_cert_cb_expect_failures callback. */
     status = test_https_server_setup(&tb,
                                      message_list, num_requests,
                                      action_list, num_requests, 0,
                                      https_set_root_ca_conn_setup,
                                      "test/server/serfserverkey.pem",
-                                     server_certs,
-                                     NULL, /* no client cert */
-                                     ssl_server_cert_cb_reject,
+                                     "test/server/serfservercert.pem",
+                                     ssl_server_cert_cb_expect_failures,
                                      test_pool);
     CuAssertIntEquals(tc, APR_SUCCESS, status);
 
@@ -1488,522 +1236,14 @@ static void test_serf_ssl_application_rejects_cert(CuTest *tc)
     /* We expect an error from the certificate validation function. */
     CuAssert(tc, "Application told serf the certificate should be rejected,"
                  " expected error!", status != APR_SUCCESS);
+
+    test_server_teardown(tb, test_pool);
+    test_teardown(test_pool);
 }
 
-/* Test for ssl certificate chain callback. */
-static apr_status_t
-cert_chain_cb(void *baton,
-              int failures,
-              int error_depth,
-              const serf_ssl_certificate_t * const * certs,
-              apr_size_t certs_len)
-{
-    test_baton_t *tb = baton;
-    apr_status_t status;
-
-    tb->result_flags |= TEST_RESULT_SERVERCERTCHAINCB_CALLED;
-
-    if (failures)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-
-    if (certs_len != 3)
-        return SERF_ERROR_ISSUE_IN_TESTSUITE;
-
-    status = validate_rootcacert(certs[2], tb->pool);
-    if (status)
-        return status;
-
-    status = validate_cacert(certs[1], tb->pool);
-    if (status)
-        return status;
-
-    status = validate_servercert(certs[0], tb->pool);
-    if (status)
-        return status;
-
-    return APR_SUCCESS;
-}
-
-static apr_status_t
-chain_rootca_callback_conn_setup(apr_socket_t *skt,
-                                 serf_bucket_t **input_bkt,
-                                 serf_bucket_t **output_bkt,
-                                 void *setup_baton,
-                                 apr_pool_t *pool)
-{
-    test_baton_t *tb = setup_baton;
-    apr_status_t status;
-
-    status = https_set_root_ca_conn_setup(skt, input_bkt, output_bkt,
-                                          setup_baton, pool);
-    if (status)
-        return status;
-
-    serf_ssl_server_cert_chain_callback_set(tb->ssl_context,
-                                            ssl_server_cert_cb_expect_allok,
-                                            cert_chain_cb,
-                                            tb);
-
-    return APR_SUCCESS;
-}
-
-/* Make the server return a partial certificate chain (server cert, CA cert),
-   the root CA cert is trusted explicitly in the client. Test the chain
-   callback. */
-static void test_serf_ssl_certificate_chain_with_anchor(CuTest *tc)
-{
-    test_baton_t *tb;
-    handler_baton_t handler_ctx[1];
-    const int num_requests = sizeof(handler_ctx)/sizeof(handler_ctx[0]);
-    apr_status_t status;
-    test_server_message_t message_list[] = {
-        {CHUNKED_REQUEST(1, "1")},
-    };
-
-    test_server_action_t action_list[] = {
-        {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
-    };
-
-    /* Set up a test context with a server */
-    apr_pool_t *test_pool = tc->testBaton;
-
-    status = test_https_server_setup(&tb,
-                                     message_list, num_requests,
-                                     action_list, num_requests, 0,
-                                     chain_rootca_callback_conn_setup,
-                                     "test/server/serfserverkey.pem",
-                                     server_certs,
-                                     NULL, /* no client cert */
-                                     ssl_server_cert_cb_expect_allok,
-                                     test_pool);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-
-    create_new_request(tb, &handler_ctx[0], "GET", "/", 1);
-
-    test_helper_run_requests_expect_ok(tc, tb, num_requests,
-                                       handler_ctx, test_pool);
-
-    CuAssertTrue(tc, tb->result_flags & TEST_RESULT_SERVERCERTCB_CALLED);
-    CuAssertTrue(tc, tb->result_flags & TEST_RESULT_SERVERCERTCHAINCB_CALLED);
-}
-
-static apr_status_t
-cert_chain_all_certs_cb(void *baton,
-                        int failures,
-                        int error_depth,
-                        const serf_ssl_certificate_t * const * certs,
-                        apr_size_t certs_len)
-{
-    /* Root CA cert is selfsigned, ignore this 'failure'. */
-    failures &= ~SERF_SSL_CERT_SELF_SIGNED;
-
-    return cert_chain_cb(baton, failures, error_depth, certs, certs_len);
-}
-
-static apr_status_t
-chain_callback_conn_setup(apr_socket_t *skt,
-                          serf_bucket_t **input_bkt,
-                          serf_bucket_t **output_bkt,
-                          void *setup_baton,
-                          apr_pool_t *pool)
-{
-    test_baton_t *tb = setup_baton;
-    apr_status_t status;
-
-    status = default_https_conn_setup(skt, input_bkt, output_bkt,
-                                      setup_baton, pool);
-    if (status)
-        return status;
-
-    serf_ssl_server_cert_chain_callback_set(tb->ssl_context,
-                                            ssl_server_cert_cb_expect_allok,
-                                            cert_chain_all_certs_cb,
-                                            tb);
-
-    return APR_SUCCESS;
-}
-
-/* Make the server return the complete certificate chain (server cert, CA cert
-   and root CA cert). Test the chain callback. */
-static void test_serf_ssl_certificate_chain_all_from_server(CuTest *tc)
-{
-    test_baton_t *tb;
-    handler_baton_t handler_ctx[1];
-    const int num_requests = sizeof(handler_ctx)/sizeof(handler_ctx[0]);
-    apr_status_t status;
-    test_server_message_t message_list[] = {
-        {CHUNKED_REQUEST(1, "1")},
-    };
-
-    test_server_action_t action_list[] = {
-        {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
-    };
-
-    /* Set up a test context with a server */
-    apr_pool_t *test_pool = tc->testBaton;
-
-    status = test_https_server_setup(&tb,
-                                     message_list, num_requests,
-                                     action_list, num_requests, 0,
-                                     chain_callback_conn_setup,
-                                     "test/server/serfserverkey.pem",
-                                     all_server_certs,
-                                     NULL, /* no client cert */
-                                     ssl_server_cert_cb_expect_allok,
-                                     test_pool);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-
-    create_new_request(tb, &handler_ctx[0], "GET", "/", 1);
-
-    test_helper_run_requests_expect_ok(tc, tb, num_requests,
-                                       handler_ctx, test_pool);
-
-    CuAssertTrue(tc, tb->result_flags & TEST_RESULT_SERVERCERTCB_CALLED);
-    CuAssertTrue(tc, tb->result_flags & TEST_RESULT_SERVERCERTCHAINCB_CALLED);
-}
-
-/* Validate that the ssl handshake succeeds if no application callbacks
-   are set, and the ssl server certificate chains is ok. */
-static void test_serf_ssl_no_servercert_callback_allok(CuTest *tc)
-{
-    test_baton_t *tb;
-    handler_baton_t handler_ctx[1];
-    const int num_requests = sizeof(handler_ctx)/sizeof(handler_ctx[0]);
-    test_server_message_t message_list[] = {
-        {CHUNKED_REQUEST(1, "1")},
-    };
-    test_server_action_t action_list[] = {
-        {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
-    };
-    apr_status_t status;
-
-    /* Set up a test context with a server */
-    apr_pool_t *test_pool = tc->testBaton;
-
-    status = test_https_server_setup(&tb,
-                                     message_list, num_requests,
-                                     action_list, num_requests, 0,
-                                     https_set_root_ca_conn_setup,
-                                     "test/server/serfserverkey.pem",
-                                     server_certs,
-                                     NULL, /* no client cert */
-                                     NULL, /* No server cert callback */
-                                     test_pool);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-
-    create_new_request(tb, &handler_ctx[0], "GET", "/", 1);
-
-    test_helper_run_requests_expect_ok(tc, tb, num_requests,
-                                       handler_ctx, test_pool);
-}
-
-/* Validate that the ssl handshake fails if no application callbacks
- are set, and the ssl server certificate chains is NOT ok. */
-static void test_serf_ssl_no_servercert_callback_fail(CuTest *tc)
-{
-    test_baton_t *tb;
-    handler_baton_t handler_ctx[1];
-    const int num_requests = sizeof(handler_ctx)/sizeof(handler_ctx[0]);
-    test_server_message_t message_list[] = {
-        {CHUNKED_REQUEST(1, "1")},
-    };
-    test_server_action_t action_list[] = {
-        {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
-    };
-    apr_status_t status;
-
-    /* Set up a test context with a server */
-    apr_pool_t *test_pool = tc->testBaton;
-
-    status = test_https_server_setup(&tb,
-                                     message_list, num_requests,
-                                     action_list, num_requests, 0,
-                                     NULL, /* default conn setup, no certs */
-                                     "test/server/serfserverkey.pem",
-                                     server_certs,
-                                     NULL, /* no client cert */
-                                     NULL, /* No server cert callback */
-                                     test_pool);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-
-    create_new_request(tb, &handler_ctx[0], "GET", "/", 1);
-
-    status = test_helper_run_requests_no_check(tc, tb, num_requests,
-                                               handler_ctx, test_pool);
-    /* We expect an error from the certificate validation function. */
-    CuAssertIntEquals(tc, SERF_ERROR_SSL_CERT_FAILED, status);
-}
-
-/* Similar to test_serf_connection_large_response, validate reading a large
-   chunked response over SSL. */
-static void test_serf_ssl_large_response(CuTest *tc)
-{
-    test_baton_t *tb;
-    handler_baton_t handler_ctx[1];
-    const int num_requests = sizeof(handler_ctx)/sizeof(handler_ctx[0]);
-    test_server_message_t message_list[] = {
-        {CHUNKED_REQUEST(1, "1")},
-    };
-    test_server_action_t action_list[1];
-    apr_status_t status;
-
-    /* Set up a test context with a server */
-    apr_pool_t *test_pool = tc->testBaton;
-    const char *response;
-
-    status = test_https_server_setup(&tb,
-                                     message_list, num_requests,
-                                     action_list, num_requests, 0,
-                                     https_set_root_ca_conn_setup,
-                                     "test/server/serfserverkey.pem",
-                                     server_certs,
-                                     NULL, /* no client cert */
-                                     NULL, /* No server cert callback */
-                                     test_pool);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-
-    /* create large chunked response message */
-    response = create_large_response_message(test_pool);
-    action_list[0].kind = SERVER_RESPOND;
-    action_list[0].text = response;
-
-    create_new_request(tb, &handler_ctx[0], "GET", "/", 1);
-
-    test_helper_run_requests_expect_ok(tc, tb, num_requests,
-                                       handler_ctx, test_pool);
-}
-
-/* Similar to test_serf_connection_large_request, validate sending a large
-   chunked request over SSL. */
-static void test_serf_ssl_large_request(CuTest *tc)
-{
-    test_baton_t *tb;
-    handler_baton_t handler_ctx[1];
-    const int num_requests = sizeof(handler_ctx)/sizeof(handler_ctx[0]);
-    test_server_message_t message_list[1];
-    test_server_action_t action_list[] = {
-        {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
-    };
-    const char *request;
-    apr_status_t status;
-
-    /* Set up a test context with a server */
-    apr_pool_t *test_pool = tc->testBaton;
-
-    status = test_https_server_setup(&tb,
-                                     message_list, num_requests,
-                                     action_list, num_requests, 0,
-                                     https_set_root_ca_conn_setup,
-                                     "test/server/serfserverkey.pem",
-                                     server_certs,
-                                     NULL, /* no client cert */
-                                     NULL, /* No server cert callback */
-                                     test_pool);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-
-    /* create large chunked request message */
-    request = create_large_request_message(test_pool);
-    message_list[0].text = request;
-
-    create_new_request(tb, &handler_ctx[0], "GET", "/", 1);
-    handler_ctx[0].request = request;
-
-    test_helper_run_requests_expect_ok(tc, tb, num_requests,
-                                       handler_ctx, test_pool);
-}
-
-static apr_status_t client_cert_cb(void *data, const char **cert_path)
-{
-    test_baton_t *tb = data;
-
-    tb->result_flags |= TEST_RESULT_CLIENT_CERTCB_CALLED;
-
-    *cert_path = "test/server/serfclientcert.p12";
-
-    return APR_SUCCESS;
-}
-
-static apr_status_t client_cert_pw_cb(void *data,
-                                      const char *cert_path,
-                                      const char **password)
-{
-    test_baton_t *tb = data;
-
-    tb->result_flags |= TEST_RESULT_CLIENT_CERTPWCB_CALLED;
-    
-    if (strcmp(cert_path, "test/server/serfclientcert.p12") == 0)
-    {
-        *password = "serftest";
-        return APR_SUCCESS;
-    }
-
-    return SERF_ERROR_ISSUE_IN_TESTSUITE;
-}
-
-static apr_status_t
-client_cert_conn_setup(apr_socket_t *skt,
-                       serf_bucket_t **input_bkt,
-                       serf_bucket_t **output_bkt,
-                       void *setup_baton,
-                       apr_pool_t *pool)
-{
-    test_baton_t *tb = setup_baton;
-    apr_status_t status;
-
-    status = https_set_root_ca_conn_setup(skt, input_bkt, output_bkt,
-                                          setup_baton, pool);
-    if (status)
-        return status;
-
-    serf_ssl_client_cert_provider_set(tb->ssl_context,
-                                      client_cert_cb,
-                                      tb,
-                                      pool);
-
-    serf_ssl_client_cert_password_set(tb->ssl_context,
-                                      client_cert_pw_cb,
-                                      tb,
-                                      pool);
-
-    return APR_SUCCESS;
-}
-
-static void test_serf_ssl_client_certificate(CuTest *tc)
-{
-    test_baton_t *tb;
-    handler_baton_t handler_ctx[1];
-    const int num_requests = sizeof(handler_ctx)/sizeof(handler_ctx[0]);
-    test_server_message_t message_list[] = {
-        {CHUNKED_REQUEST(1, "1")},
-    };
-    test_server_action_t action_list[] = {
-        {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
-    };
-    apr_status_t status;
-
-    /* Set up a test context with a server */
-    apr_pool_t *test_pool = tc->testBaton;
-
-    /* The SSL server the complete certificate chain to validate the client
-       certificate. */
-    status = test_https_server_setup(&tb,
-                                     message_list, num_requests,
-                                     action_list, num_requests, 0,
-                                     client_cert_conn_setup,
-                                     "test/server/serfserverkey.pem",
-                                     all_server_certs,
-                                     "Serf Client",
-                                     NULL, /* No server cert callback */
-                                     test_pool);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-
-    create_new_request(tb, &handler_ctx[0], "GET", "/", 1);
-
-    test_helper_run_requests_expect_ok(tc, tb, num_requests,
-                                       handler_ctx, test_pool);
-
-    CuAssertTrue(tc, tb->result_flags & TEST_RESULT_CLIENT_CERTCB_CALLED);
-    CuAssertTrue(tc, tb->result_flags & TEST_RESULT_CLIENT_CERTPWCB_CALLED);
-}
-
-/* Validate that the expired certificate is reported as failure in the
-   callback. */
-static void test_serf_ssl_expired_server_cert(CuTest *tc)
-{
-    test_baton_t *tb;
-    handler_baton_t handler_ctx[1];
-    const int num_requests = sizeof(handler_ctx)/sizeof(handler_ctx[0]);
-    int expected_failures;
-    apr_status_t status;
-    test_server_message_t message_list[] = {
-        {CHUNKED_REQUEST(1, "1")},
-    };
-
-    test_server_action_t action_list[] = {
-        {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
-    };
-    static const char *expired_server_certs[] = {
-        "test/server/serfserver_expired_cert.pem",
-        "test/server/serfcacert.pem",
-        "test/server/serfrootcacert.pem",
-        NULL };
-
-    /* Set up a test context with a server */
-    apr_pool_t *test_pool = tc->testBaton;
-
-    status = test_https_server_setup(&tb,
-                                     message_list, num_requests,
-                                     action_list, num_requests, 0,
-                                     NULL, /* default conn setup */
-                                     "test/server/serfserverkey.pem",
-                                     expired_server_certs,
-                                     NULL, /* no client cert */
-                                     ssl_server_cert_cb_expect_failures,
-                                     test_pool);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-
-    expected_failures = SERF_SSL_CERT_SELF_SIGNED |
-                        SERF_SSL_CERT_EXPIRED;
-    tb->user_baton = &expected_failures;
-
-    create_new_request(tb, &handler_ctx[0], "GET", "/", 1);
-
-    test_helper_run_requests_expect_ok(tc, tb, num_requests, handler_ctx,
-                                       test_pool);
-}
-
-/* Validate that the expired certificate is reported as failure in the
- callback. */
-static void test_serf_ssl_future_server_cert(CuTest *tc)
-{
-    test_baton_t *tb;
-    handler_baton_t handler_ctx[1];
-    const int num_requests = sizeof(handler_ctx)/sizeof(handler_ctx[0]);
-    int expected_failures;
-    apr_status_t status;
-    test_server_message_t message_list[] = {
-        {CHUNKED_REQUEST(1, "1")},
-    };
-
-    test_server_action_t action_list[] = {
-        {SERVER_RESPOND, CHUNKED_EMPTY_RESPONSE},
-    };
-    static const char *future_server_certs[] = {
-        "test/server/serfserver_future_cert.pem",
-        "test/server/serfcacert.pem",
-        "test/server/serfrootcacert.pem",
-        NULL };
-
-    /* Set up a test context with a server */
-    apr_pool_t *test_pool = tc->testBaton;
-
-    status = test_https_server_setup(&tb,
-                                     message_list, num_requests,
-                                     action_list, num_requests, 0,
-                                     NULL, /* default conn setup */
-                                     "test/server/serfserverkey.pem",
-                                     future_server_certs,
-                                     NULL, /* no client cert */
-                                     ssl_server_cert_cb_expect_failures,
-                                     test_pool);
-    CuAssertIntEquals(tc, APR_SUCCESS, status);
-
-    expected_failures = SERF_SSL_CERT_SELF_SIGNED |
-                        SERF_SSL_CERT_NOTYETVALID;
-    tb->user_baton = &expected_failures;
-
-    create_new_request(tb, &handler_ctx[0], "GET", "/", 1);
-
-    test_helper_run_requests_expect_ok(tc, tb, num_requests, handler_ctx,
-                                       test_pool);
-}
-
-/*****************************************************************************/
 CuSuite *test_context(void)
 {
     CuSuite *suite = CuSuiteNew();
-
-    CuSuiteSetSetupTeardownCallbacks(suite, test_setup, test_teardown);
 
     SUITE_ADD_TEST(suite, test_serf_connection_request_create);
     SUITE_ADD_TEST(suite, test_serf_connection_priority_request_create);
@@ -2013,20 +1253,9 @@ CuSuite *test_context(void)
     SUITE_ADD_TEST(suite, test_keepalive_limit_one_by_one_and_burst);
     SUITE_ADD_TEST(suite, test_serf_progress_callback);
     SUITE_ADD_TEST(suite, test_serf_request_timeout);
-    SUITE_ADD_TEST(suite, test_serf_connection_large_response);
-    SUITE_ADD_TEST(suite, test_serf_connection_large_request);
     SUITE_ADD_TEST(suite, test_serf_ssl_handshake);
     SUITE_ADD_TEST(suite, test_serf_ssl_trust_rootca);
     SUITE_ADD_TEST(suite, test_serf_ssl_application_rejects_cert);
-    SUITE_ADD_TEST(suite, test_serf_ssl_certificate_chain_with_anchor);
-    SUITE_ADD_TEST(suite, test_serf_ssl_certificate_chain_all_from_server);
-    SUITE_ADD_TEST(suite, test_serf_ssl_no_servercert_callback_allok);
-    SUITE_ADD_TEST(suite, test_serf_ssl_no_servercert_callback_fail);
-    SUITE_ADD_TEST(suite, test_serf_ssl_large_response);
-    SUITE_ADD_TEST(suite, test_serf_ssl_large_request);
-    SUITE_ADD_TEST(suite, test_serf_ssl_client_certificate);
-    SUITE_ADD_TEST(suite, test_serf_ssl_expired_server_cert);
-    SUITE_ADD_TEST(suite, test_serf_ssl_future_server_cert);
 
     return suite;
 }

@@ -24,10 +24,6 @@
  * Originally obtained from "http://cutest.sourceforge.net/" version 1.4.
  *
  * Modified for serf as follows
- *    4) added CuSuiteSetSetupTeardownCallbacks to set a constructor and
- *       destructor per test suite, run for each test.
- *    3) added CuAssertStrnEquals(), CuAssertStrnEquals_Msg() and
- *       CuAssertStrnEquals_LineMsg()
  *    2) removed const from struct CuTest.name
  *    1) added CuStringFree(), CuTestFree(), CuSuiteFree(), and
  *       CuSuiteFreeDeep()
@@ -73,8 +69,6 @@ typedef struct CuTest CuTest;
 
 typedef void (*TestFunction)(CuTest *);
 
-typedef void *(*TestCallback)(void *baton);
-
 struct CuTest
 {
     char* name;
@@ -83,10 +77,6 @@ struct CuTest
     int ran;
     const char* message;
     jmp_buf *jumpBuf;
-
-    TestCallback setup;
-    TestCallback teardown;
-    void *testBaton;
 };
 
 void CuTestInit(CuTest* t, const char* name, TestFunction function);
@@ -145,9 +135,6 @@ typedef struct
     CuTest* list[MAX_TEST_CASES];
     int failCount;
 
-    TestCallback setup;
-    TestCallback teardown;
-    void *testBaton;
 } CuSuite;
 
 
@@ -160,8 +147,5 @@ void CuSuiteAddSuite(CuSuite* testSuite, CuSuite* testSuite2);
 void CuSuiteRun(CuSuite* testSuite);
 void CuSuiteSummary(CuSuite* testSuite, CuString* summary);
 void CuSuiteDetails(CuSuite* testSuite, CuString* details);
-
-void CuSuiteSetSetupTeardownCallbacks(CuSuite* testSuite, TestCallback setup,
-                                      TestCallback teardown);
 
 #endif /* CU_TEST_H */

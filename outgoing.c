@@ -897,7 +897,8 @@ static apr_status_t handle_response(serf_request_t *request,
 
          If the authentication was tried, but failed, pass the response
          to the application, maybe it can do better. */
-      if (status) {
+      if (APR_STATUS_IS_EOF(status) ||
+          APR_STATUS_IS_EAGAIN(status)) {
           return status;
       }
     }

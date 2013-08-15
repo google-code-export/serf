@@ -215,8 +215,7 @@ void CuAssertStrnEquals_LineMsg(CuTest* tc, const char* file, int line, const ch
                                 const char* actual)
 {
     CuString string;
-    if ((explen == 0) ||
-        (expected == NULL && actual == NULL) ||
+    if ((expected == NULL && actual == NULL) ||
         (expected != NULL && actual != NULL &&
          strncmp(expected, actual, explen) == 0))
     {

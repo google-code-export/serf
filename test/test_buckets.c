@@ -554,8 +554,6 @@ static void test_aggregate_buckets(CuTest *tc)
     bkt = SERF_BUCKET_SIMPLE_STRING(BODY, alloc);
     serf_bucket_aggregate_append(aggbkt, bkt);
 
-    CuAssertTrue(tc, serf_bucket_get_remaining(aggbkt) == 62);
-
     status = serf_bucket_read_iovec(aggbkt, 0, 32,
                                     tgt_vecs, &vecs_used);
     CuAssertIntEquals(tc, APR_SUCCESS, status);
@@ -585,8 +583,6 @@ static void test_aggregate_buckets(CuTest *tc)
     bkt = SERF_BUCKET_SIMPLE_STRING_LEN(BODY+15, strlen(BODY)-15, alloc);
     serf_bucket_aggregate_append(aggbkt, bkt);
 
-    CuAssertTrue(tc, serf_bucket_get_remaining(aggbkt) == 62);
-
     read_and_check_bucket(tc, aggbkt, BODY);
 
     /* Test 5: multiple child buckets prepended. */
@@ -596,8 +592,6 @@ static void test_aggregate_buckets(CuTest *tc)
     serf_bucket_aggregate_prepend(aggbkt, bkt);
     bkt = SERF_BUCKET_SIMPLE_STRING_LEN(BODY, 15, alloc);
     serf_bucket_aggregate_prepend(aggbkt, bkt);
-
-    CuAssertTrue(tc, serf_bucket_get_remaining(aggbkt) == 62);
 
     read_and_check_bucket(tc, aggbkt, BODY);
 
@@ -686,15 +680,12 @@ static void test_response_body_too_small_cl(CuTest *tc)
 
         status = serf_bucket_read(bkt, SERF_READ_ALL_AVAIL, &data, &len);
 
-        /* On error data and len is undefined.*/
-        if (!SERF_BUCKET_READ_ERROR(status)) {
-            CuAssert(tc, "Read more data than expected.",
-                     strlen(BODY) >= len);
-            CuAssert(tc, "Read data is not equal to expected.",
-                     strncmp(BODY, data, len) == 0);
-            CuAssert(tc, "Error expected due to response body too short!",
-                     SERF_BUCKET_READ_ERROR(status));
-        }
+        CuAssert(tc, "Read more data than expected.",
+                 strlen(BODY) >= len);
+        CuAssert(tc, "Read data is not equal to expected.",
+                 strncmp(BODY, data, len) == 0);
+        CuAssert(tc, "Error expected due to response body too short!",
+                 SERF_BUCKET_READ_ERROR(status));
         CuAssertIntEquals(tc, SERF_ERROR_TRUNCATED_HTTP_RESPONSE, status);
     }
 }
@@ -732,15 +723,12 @@ static void test_response_body_too_small_chunked(CuTest *tc)
 
         status = serf_bucket_read(bkt, SERF_READ_ALL_AVAIL, &data, &len);
 
-        /* On error data and len is undefined.*/
-        if (!SERF_BUCKET_READ_ERROR(status)) {
-            CuAssert(tc, "Read more data than expected.",
-                     strlen(BODY) >= len);
-            CuAssert(tc, "Read data is not equal to expected.",
-                     strncmp(BODY, data, len) == 0);
-            CuAssert(tc, "Error expected due to response body too short!",
-                     SERF_BUCKET_READ_ERROR(status));
-        }
+        CuAssert(tc, "Read more data than expected.",
+                 strlen(BODY) >= len);
+        CuAssert(tc, "Read data is not equal to expected.",
+                 strncmp(BODY, data, len) == 0);
+        CuAssert(tc, "Error expected due to response body too short!",
+                 SERF_BUCKET_READ_ERROR(status));
         CuAssertIntEquals(tc, SERF_ERROR_TRUNCATED_HTTP_RESPONSE, status);
     }
 }
@@ -994,100 +982,6 @@ static void test_linebuf_crlf_split(CuTest *tc)
     CuAssert(tc, "Read less data than expected.", strlen(expected) == 0);
 }
 
-/* Test that the Content-Length header will be ignored when the response
-   should not have returned a body. See RFC2616, section 4.4, nbr. 1. */
-static void test_response_no_body_expected(CuTest *tc)
-{
-    serf_bucket_t *bkt, *tmp;
-    apr_pool_t *test_pool = tc->testBaton;
-    char buf[1024];
-    apr_size_t len;
-    serf_bucket_alloc_t *alloc;
-    int i;
-    apr_status_t status;
-
-    /* response bucket should consider the blablablablabla as start of the
-       next response, in all these cases it should APR_EOF after the empty
-       line. */
-    test_server_message_t message_list[] = {
-        { "HTTP/1.1 100 Continue" CRLF
-          "Content-Type: text/plain" CRLF
-          "Content-Length: 6500000" CRLF
-          CRLF
-          "blablablablabla" CRLF },
-        { "HTTP/1.1 204 No Content" CRLF
-            "Content-Type: text/plain" CRLF
-            "Content-Length: 6500000" CRLF
-            CRLF
-            "blablablablabla" CRLF },
-        { "HTTP/1.1 304 Not Modified" CRLF
-            "Content-Type: text/plain" CRLF
-            "Content-Length: 6500000" CRLF
-            CRLF
-            "blablablablabla" CRLF },
-    };
-
-    alloc = serf_bucket_allocator_create(test_pool, NULL, NULL);
-
-    /* Test 1: a response to a HEAD request. */
-    tmp = SERF_BUCKET_SIMPLE_STRING("HTTP/1.1 200 OK" CRLF
-                                    "Content-Type: text/plain" CRLF
-                                    "Content-Length: 6500000" CRLF
-                                    CRLF
-                                    "blablablablabla" CRLF,
-                                    alloc);
-
-    bkt = serf_bucket_response_create(tmp, alloc);
-    serf_bucket_response_set_head(bkt);
-
-    status = read_all(bkt, buf, sizeof(buf), &len);
-
-    CuAssertIntEquals(tc, APR_EOF, status);
-    CuAssertIntEquals(tc, 0, len);
-
-    /* Test 2: a response with status for which server must not send a body. */
-    for (i = 0; i < sizeof(message_list) / sizeof(test_server_message_t); i++) {
-
-        tmp = SERF_BUCKET_SIMPLE_STRING(message_list[i].text, alloc);
-        bkt = serf_bucket_response_create(tmp, alloc);
-
-        status = read_all(bkt, buf, sizeof(buf), &len);
-
-        CuAssertIntEquals(tc, APR_EOF, status);
-        CuAssertIntEquals(tc, 0, len);
-    }
-}
-
-/* Test handling IIS 'extended' status codes (like 401.1) by response
-   buckets. */
-static void test_response_bucket_iis_status_code(CuTest *tc)
-{
-    serf_bucket_t *bkt, *tmp;
-    apr_pool_t *test_pool = tc->testBaton;
-    serf_status_line sline;
-    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
-                                                              NULL);
-
-    tmp = SERF_BUCKET_SIMPLE_STRING("HTTP/1.1 401.1 Logon failed." CRLF
-                                    "Content-Type: text/plain" CRLF
-                                    "Content-Length: 2" CRLF
-                                    CRLF
-                                    "AB",
-                                    alloc);
-
-    bkt = serf_bucket_response_create(tmp, alloc);
-
-    read_and_check_bucket(tc, bkt, "AB");
-
-    serf_bucket_response_status(bkt, &sline);
-    CuAssertTrue(tc, sline.version == SERF_HTTP_11);
-    CuAssertIntEquals(tc, 401, sline.code);
-
-    /* Probably better to have just "Logon failed" as reason. But current
-       behavior is also acceptable.*/
-    CuAssertStrEquals(tc, ".1 Logon failed.", sline.reason);
-}
-
 /* Test that serf can handle lines that don't arrive completely in one go.
    It doesn't really run random, it tries inserting APR_EAGAIN in all possible
    places in the response message, only one currently. */
@@ -1276,14 +1170,12 @@ CuSuite *test_buckets(void)
     SUITE_ADD_TEST(suite, test_response_body_chunked_incomplete_crlf);
     SUITE_ADD_TEST(suite, test_response_body_chunked_gzip_small);
     SUITE_ADD_TEST(suite, test_response_bucket_peek_at_headers);
-    SUITE_ADD_TEST(suite, test_response_bucket_iis_status_code);
     SUITE_ADD_TEST(suite, test_bucket_header_set);
     SUITE_ADD_TEST(suite, test_iovec_buckets);
     SUITE_ADD_TEST(suite, test_aggregate_buckets);
     SUITE_ADD_TEST(suite, test_aggregate_bucket_readline);
     SUITE_ADD_TEST(suite, test_header_buckets);
     SUITE_ADD_TEST(suite, test_linebuf_crlf_split);
-    SUITE_ADD_TEST(suite, test_response_no_body_expected);
     SUITE_ADD_TEST(suite, test_random_eagain_in_response);
     SUITE_ADD_TEST(suite, test_dechunk_buckets);
 #if 0

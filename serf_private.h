@@ -33,14 +33,6 @@
 #define REQUESTED_MAX (~((apr_size_t)0))
 #endif
 
-#ifndef APR_VERSION_AT_LEAST /* Introduced in APR 1.3.0 */
-#define APR_VERSION_AT_LEAST(major,minor,patch)                           \
-    (((major) < APR_MAJOR_VERSION)                                        \
-      || ((major) == APR_MAJOR_VERSION && (minor) < APR_MINOR_VERSION)    \
-      || ((major) == APR_MAJOR_VERSION && (minor) == APR_MINOR_VERSION && \
-               (patch) <= APR_PATCH_VERSION))
-#endif /* APR_VERSION_AT_LEAST */
-
 #define SERF_IO_CLIENT (1)
 #define SERF_IO_CONN (2)
 #define SERF_IO_LISTENER (3)
@@ -317,6 +309,7 @@ typedef apr_status_t
                              serf_bucket_t *response,
                              const char *auth_hdr,
                              const char *auth_attr,
+                             void *baton,
                              apr_pool_t *pool);
 
 /**
@@ -407,6 +400,7 @@ struct serf__authn_scheme_t {
 apr_status_t serf__handle_auth_response(int *consumed_response,
                                         serf_request_t *request,
                                         serf_bucket_t *response,
+                                        void *baton,
                                         apr_pool_t *pool);
 
 /* Get the cached serf__authn_info_t object for the target server, or create one
@@ -437,12 +431,10 @@ apr_status_t serf__provide_credentials(serf_context_t *ctx,
                                        char **username,
                                        char **password,
                                        serf_request_t *request,
+                                       void *baton,
                                        int code, const char *authn_type,
                                        const char *realm,
                                        apr_pool_t *pool);
-
-/* Requeue a request (at the front).  */
-serf_request_t *serf__request_requeue(const serf_request_t *request);
 
 /* from ssltunnel.c */
 apr_status_t serf__ssltunnel_connect(serf_connection_t *conn);

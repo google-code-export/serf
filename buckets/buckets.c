@@ -122,12 +122,6 @@ void serf_default_destroy_and_data(serf_bucket_t *bucket)
 }
 
 
-serf_bucket_t * serf_buckets_are_v2(serf_bucket_t *bucket,
-                                    const serf_bucket_type_t *type)
-{
-    return bucket->type->read_bucket_v2(bucket, type);
-}
-
 /* ==================================================================== */
 
 
@@ -513,10 +507,11 @@ apr_status_t serf_linebuf_fetch(
                out EOF state, so they'll return no data in that read. This
                means we're done reading, return what we got. */
             if (APR_STATUS_IS_EOF(status) && len == 0) {
-                return status;
+	        return status;
             }
             if (linebuf->used + len > sizeof(linebuf->line)) {
-                return SERF_ERROR_LINE_TOO_LONG;
+                /* ### need a "line too long" error */
+                return APR_EGENERAL;
             }
 
             /* Note: our logic doesn't change for SERF_LINEBUF_PARTIAL. That
@@ -575,7 +570,7 @@ static void log_time()
     apr_time_exp_t tm;
 
     apr_time_exp_lt(&tm, apr_time_now());
-    fprintf(stderr, "%d-%02d-%02dT%02d:%02d:%02d.%06d%+03d ",
+    fprintf(stderr, "[%d-%02d-%02dT%02d:%02d:%02d.%06d%+03d] ",
             1900 + tm.tm_year, 1 + tm.tm_mon, tm.tm_mday,
             tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_usec,
             tm.tm_gmtoff/3600);

@@ -34,7 +34,6 @@ typedef struct {
     int head_request;
     serf_ssl_context_t *ssl_ctx;
     serf_bucket_alloc_t *bkt_alloc;
-    serf_context_t *serf_ctx;
 } app_baton_t;
 
 static void closed_connection(serf_connection_t *conn,
@@ -153,8 +152,7 @@ static apr_status_t conn_setup(apr_socket_t *skt,
     serf_bucket_t *c;
     app_baton_t *ctx = setup_baton;
 
-    c = serf_context_bucket_socket_create(ctx->serf_ctx, skt,
-                                          ctx->bkt_alloc);
+    c = serf_bucket_socket_create(skt, ctx->bkt_alloc);
     if (ctx->using_ssl) {
         c = serf_bucket_ssl_decrypt_create(c, ctx->ssl_ctx, ctx->bkt_alloc);
         if (!ctx->ssl_ctx) {
@@ -417,6 +415,7 @@ int main(int argc, const char **argv)
     serf_bucket_alloc_t *bkt_alloc;
     serf_context_t *context;
     serf_connection_t *connection;
+    serf_request_t *request;
     app_baton_t app_ctx;
     handler_baton_t handler_ctx;
     serf_bucket_t *req_hdrs = NULL;
@@ -555,7 +554,6 @@ int main(int argc, const char **argv)
     app_ctx.hostinfo = url.hostinfo;
 
     context = serf_context_create(pool);
-    app_ctx.serf_ctx = context;
 
     if (proxy)
     {
@@ -626,12 +624,7 @@ int main(int argc, const char **argv)
 
     handler_ctx.completed_requests = 0;
     handler_ctx.print_headers = print_headers;
-
-#if APR_VERSION_AT_LEAST(1, 3, 0)
-    apr_file_open_flags_stdout(&handler_ctx.output_file, APR_BUFFERED, pool);
-#else
     apr_file_open_stdout(&handler_ctx.output_file, pool);
-#endif
 
     handler_ctx.host = url.hostinfo;
     handler_ctx.method = method;
@@ -654,9 +647,8 @@ int main(int argc, const char **argv)
     serf_connection_set_max_outstanding_requests(connection, inflight);
 
     for (i = 0; i < count; i++) {
-        /* We don't need the returned request here. */
-        serf_connection_request_create(connection, setup_request,
-                                       &handler_ctx);
+        request = serf_connection_request_create(connection, setup_request,
+                                                 &handler_ctx);
     }
 
     while (1) {
@@ -681,8 +673,6 @@ int main(int argc, const char **argv)
         /* Debugging purposes only! */
         serf_debug__closed_conn(app_ctx.bkt_alloc);
     }
-
-    apr_file_close(handler_ctx.output_file);
 
     serf_connection_close(connection);
 

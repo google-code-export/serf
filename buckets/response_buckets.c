@@ -161,10 +161,7 @@ static apr_status_t fetch_headers(serf_bucket_t *bkt, response_context_t *ctx)
      * accept any kind of line ending.
      */
     status = fetch_line(ctx, SERF_NEWLINE_ANY);
-    /* Convert generic 'line too long' error to specific one. */
-    if (status == SERF_ERROR_LINE_TOO_LONG) {
-        return SERF_ERROR_RESPONSE_HEADER_TOO_LONG;
-    } else if (SERF_BUCKET_READ_ERROR(status)) {
+    if (SERF_BUCKET_READ_ERROR(status)) {
         return status;
     }
     /* Something was read. Process it. */
@@ -220,11 +217,7 @@ static apr_status_t run_machine(serf_bucket_t *bkt, response_context_t *ctx)
          * accept any kind of line ending.
          */
         status = fetch_line(ctx, SERF_NEWLINE_ANY);
-
-        /* Convert generic 'line too long' error to specific one. */
-        if (status == SERF_ERROR_LINE_TOO_LONG)
-            return SERF_ERROR_STATUS_LINE_TOO_LONG;
-        else if (SERF_BUCKET_READ_ERROR(status))
+        if (SERF_BUCKET_READ_ERROR(status))
             return status;
 
         if (ctx->linebuf.state == SERF_LINEBUF_READY) {

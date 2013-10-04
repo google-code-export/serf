@@ -181,8 +181,7 @@ typedef struct
    claim to be. The session key can only be used with the HTTP service
    on the target host. */
 static apr_status_t
-gss_api_get_credentials(serf_connection_t *conn,
-                        char *token, apr_size_t token_len,
+gss_api_get_credentials(char *token, apr_size_t token_len,
                         const char *hostname,
                         const char **buf, apr_size_t *buf_len,
                         gss_authn_info_t *gss_info)
@@ -203,7 +202,6 @@ gss_api_get_credentials(serf_connection_t *conn,
 
     /* Establish a security context to the server. */
     status = serf__spnego_init_sec_context(
-         conn,
          gss_info->gss_ctx,
          KRB_HTTP_SERVICE, hostname,
          &input_buf,
@@ -316,8 +314,9 @@ do_auth(peer_t peer,
     if (request->auth_baton && !token) {
         /* We provided token with this request, but server responded with empty
            authentication header. This means server rejected our credentials.
-         */
-        return SERF_ERROR_AUTHN_CREDENTIALS_REJECTED;
+           XXX: Probably we need separate error code for this case like
+           SERF_ERROR_AUTHN_CREDS_REJECTED? */
+        return SERF_ERROR_AUTHN_FAILED;
     }
 
     /* If the server didn't provide us with a token, start with a new initial
@@ -328,16 +327,14 @@ do_auth(peer_t peer,
     }
 
     if (peer == HOST) {
-        status = gss_api_get_credentials(conn,
-                                         token, token_len,
+        status = gss_api_get_credentials(token, token_len,
                                          conn->host_info.hostname,
                                          &tmp, &tmp_len,
                                          gss_info);
     } else {
         char *proxy_host;
         apr_getnameinfo(&proxy_host, conn->ctx->proxy_address, 0);
-        status = gss_api_get_credentials(conn,
-                                         token, token_len, proxy_host,
+        status = gss_api_get_credentials(token, token_len, proxy_host,
                                          &tmp, &tmp_len,
                                          gss_info);
     }
@@ -409,6 +406,7 @@ serf__handle_spnego_auth(int code,
                          serf_bucket_t *response,
                          const char *auth_hdr,
                          const char *auth_attr,
+                         void *baton,
                          apr_pool_t *pool)
 {
     serf_connection_t *conn = request->conn;
@@ -578,6 +576,14 @@ serf__validate_response_spnego_auth(const serf__authn_scheme_t *scheme,
     gss_authn_info_t *gss_info;
     const char *auth_hdr_name;
 
+    /* TODO: currently this function is only called when a response includes
+       an Authenticate header. This header is optional. If the server does
+       not provide this header on the first 2xx response, we will not promote
+       the connection from undecided to stateful. This won't break anything,
+       but means we stay in non-pipelining mode. */
+    serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
+                  "Validate Negotiate response header.\n");
+
     if (peer == HOST) {
         gss_info = conn->authn_baton;
         auth_hdr_name = "WWW-Authenticate";
@@ -590,9 +596,6 @@ serf__validate_response_spnego_auth(const serf__authn_scheme_t *scheme,
         serf_bucket_t *hdrs;
         const char *auth_hdr_val;
         apr_status_t status;
-
-        serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
-                      "Validate SPNEGO response header.\n");
 
         hdrs = serf_bucket_response_get_headers(response);
         auth_hdr_val = get_auth_header(hdrs, auth_hdr_name, scheme->name,

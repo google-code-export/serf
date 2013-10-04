@@ -285,12 +285,6 @@ apr_status_t serf_context_run(
            ### look at the potential return codes. map to our defined
            ### return values? ...
         */
-
-        /* Use the strict documented error for poll timeouts, to allow proper
-           handling of the other timeout types when returned from
-           serf_event_trigger */
-        if (APR_STATUS_IS_TIMEUP(status))
-            return APR_TIMEUP; /* Return the documented error */
         return status;
     }
 
@@ -299,10 +293,6 @@ apr_status_t serf_context_run(
 
         status = serf_event_trigger(ctx, conn, desc);
         if (status) {
-            /* Don't return APR_TIMEUP as a connection error, as our caller
-               will use that as a trigger to call us again */
-            if (APR_STATUS_IS_TIMEUP(status))
-                status = SERF_ERROR_CONNECTION_TIMEDOUT;
             return status;
         }
 
@@ -329,10 +319,6 @@ serf_bucket_t *serf_context_bucket_socket_create(
     serf_bucket_alloc_t *allocator)
 {
     serf_bucket_t *bucket = serf_bucket_socket_create(skt, allocator);
-
-    bucket = serf__bucket_log_wrapper_create(bucket, "receiving raw",
-                                             skt,
-                                             allocator);
 
     /* Use serf's default bytes read/written callback */
     serf_bucket_socket_set_read_progress_cb(bucket,
@@ -370,14 +356,6 @@ const char *serf_error_string(apr_status_t errcode)
         return "The server sent a truncated HTTP response body.";
     case SERF_ERROR_ABORTED_CONNECTION:
         return "The server unexpectedly closed the connection.";
-    case SERF_ERROR_LINE_TOO_LONG:
-        return "The line too long";
-    case SERF_ERROR_STATUS_LINE_TOO_LONG:
-        return "The HTTP response status line too long";
-    case SERF_ERROR_RESPONSE_HEADER_TOO_LONG:
-        return "The HTTP response header too long";
-    case SERF_ERROR_CONNECTION_TIMEDOUT:
-        return "The connection timed out";
     case SERF_ERROR_SSL_COMM_FAILED:
         return "An error occurred during SSL communication";
     case SERF_ERROR_SSL_CERT_FAILED:
@@ -390,8 +368,6 @@ const char *serf_error_string(apr_status_t errcode)
         return "An authentication attribute is missing";
     case SERF_ERROR_AUTHN_INITALIZATION_FAILED:
         return "Initialization of an authentication type failed";
-    case SERF_ERROR_AUTHN_CREDENTIALS_REJECTED:
-        return "The user credentials were rejected by the server";
     case SERF_ERROR_SSLTUNNEL_SETUP_FAILED:
         return "The proxy server returned an error while setting up the "
                "SSL tunnel.";

@@ -238,10 +238,6 @@ static apr_status_t do_conn_setup(serf_connection_t *conn)
     apr_status_t status;
     serf_bucket_t *ostream;
 
-    /* ### dunno what the hell this is about. this latency stuff got
-       ### added, and who knows whether it should stay...  */
-    conn->latency = apr_time_now() - conn->connect_time;
-
     if (conn->ostream_head == NULL) {
         conn->ostream_head = serf_bucket_aggregate_create(conn->allocator);
     }
@@ -269,24 +265,6 @@ static apr_status_t do_conn_setup(serf_connection_t *conn)
     serf_bucket_aggregate_append(conn->ostream_head,
                                  ostream);
 
-    /* We typically have one of two scenarios, based on whether the
-       application decided to encrypt this connection:
-
-       PLAIN:
-
-         conn->stream = SOCKET(skt)
-         conn->ostream_head = AGGREGATE(ostream_tail)
-         conn->ostream_tail = STREAM(<detect_eof>, REQ1, REQ2, ...)
-
-       ENCRYPTED:
-
-         conn->stream = DECRYPT(SOCKET(skt))
-         conn->ostream_head = AGGREGATE(ENCRYPT(ostream_tail))
-         conn->ostream_tail = STREAM(<detect_eof>, REQ1, REQ2, ...)
-
-       where STREAM is an internal variant of AGGREGATE.
-    */
-
     return status;
 }
 
@@ -301,10 +279,15 @@ static apr_status_t do_conn_setup(serf_connection_t *conn)
  */
 
 static apr_status_t prepare_conn_streams(serf_connection_t *conn,
+                                         serf_bucket_t **istream,
                                          serf_bucket_t **ostreamt,
                                          serf_bucket_t **ostreamh)
 {
     apr_status_t status;
+
+    if (conn->stream == NULL) {
+        conn->latency = apr_time_now() - conn->connect_time;
+    }
 
     /* Do we need a SSL tunnel first? */
     if (conn->state == SERF_CONN_CONNECTED) {
@@ -319,17 +302,14 @@ static apr_status_t prepare_conn_streams(serf_connection_t *conn,
         }
         *ostreamt = conn->ostream_tail;
         *ostreamh = conn->ostream_head;
+        *istream = conn->stream;
     } else {
-        /* state == SERF_CONN_SETUP_SSLTUNNEL  */
-
         /* SSL tunnel needed and not set up yet, get a direct unencrypted
          stream for this socket */
         if (conn->stream == NULL) {
-            conn->stream = serf_context_bucket_socket_create(conn->ctx,
-                                                             conn->skt,
-                                                             conn->allocator);
+            *istream = serf_bucket_socket_create(conn->skt,
+                                                 conn->allocator);
         }
-
         /* Don't create the ostream bucket chain including the ssl_encrypt
          bucket yet. This ensure the CONNECT request is sent unencrypted
          to the proxy. */
@@ -433,10 +413,15 @@ apr_status_t serf__open_connections(serf_context_t *ctx)
         if (ctx->proxy_address && strcmp(conn->host_info.scheme, "https") == 0)
             serf__ssltunnel_connect(conn);
         else {
+            serf_bucket_t *dummy1, *dummy2;
+
             conn->state = SERF_CONN_CONNECTED;
-            status = do_conn_setup(conn);
-            if (status)
+
+            status = prepare_conn_streams(conn, &conn->stream,
+                                          &dummy1, &dummy2);
+            if (status) {
                 return status;
+            }
         }
     }
 
@@ -447,8 +432,8 @@ static apr_status_t no_more_writes(serf_connection_t *conn)
 {
     /* Note that we should hold new requests until we open our new socket. */
     conn->state = SERF_CONN_CLOSING;
-    serf__log_skt(CONN_VERBOSE, __FILE__, conn->skt,
-                  "stop writing on conn 0x%x\n", conn);
+    serf__log(CONN_VERBOSE, __FILE__, "stop writing on conn 0x%x\n",
+              conn);
 
     /* Clear our iovec. */
     conn->vec_len = 0;
@@ -511,9 +496,8 @@ static apr_status_t destroy_request(serf_request_t *request)
         request->req_bkt = NULL;
     }
 
+    serf_debug__bucket_alloc_check(request->allocator);
     if (request->respool) {
-        serf_debug__bucket_alloc_check(request->allocator);
-
         /* ### unregister the pool cleanup for self?  */
         apr_pool_destroy(request->respool);
     }
@@ -580,9 +564,6 @@ static apr_status_t reset_connection(serf_connection_t *conn,
     apr_status_t status;
     serf_request_t *old_reqs;
 
-    serf__log_skt(CONN_VERBOSE, __FILE__, conn->skt, "reset connection 0x%x\n",
-                  conn);
-
     conn->probable_keepalive_limit = conn->completed_responses;
     conn->completed_requests = 0;
     conn->completed_responses = 0;
@@ -642,6 +623,8 @@ static apr_status_t reset_connection(serf_connection_t *conn,
     conn->ctx->dirty_pollset = 1;
     conn->state = SERF_CONN_INIT;
 
+    serf__log(CONN_VERBOSE, __FILE__, "reset connection 0x%x\n", conn);
+
     conn->status = APR_SUCCESS;
 
     /* Let our context know that we've 'reset' the socket already. */
@@ -667,8 +650,8 @@ static apr_status_t socket_writev(serf_connection_t *conn)
         apr_size_t len = 0;
         int i;
 
-        serf__log_skt(SOCK_VERBOSE || SOCK_MSG_VERBOSE, __FILE__, conn->skt,
-                      "--- socket_sendv: %d bytes. --\n", written);
+        serf__log_skt(SOCK_MSG_VERBOSE, __FILE__, conn->skt,
+                      "--- socket_sendv:\n");
 
         for (i = 0; i < conn->vec_len; i++) {
             len += conn->vec[i].iov_len;
@@ -692,7 +675,7 @@ static apr_status_t socket_writev(serf_connection_t *conn)
         if (len == written) {
             conn->vec_len = 0;
         }
-        serf__log_nopref(SOCK_MSG_VERBOSE, "\n");
+        serf__log_nopref(SOCK_MSG_VERBOSE, "-(%d)-\n", written);
 
         /* Log progress information */
         serf__context_progress_delta(conn->ctx, 0, written);
@@ -747,23 +730,18 @@ static apr_status_t write_to_connection(serf_connection_t *conn)
         apr_status_t read_status;
         serf_bucket_t *ostreamt;
         serf_bucket_t *ostreamh;
+        int max_outstanding_requests = conn->max_outstanding_requests;
 
         /* If we're setting up an ssl tunnel, we can't send real requests
            at yet, as they need to be encrypted and our encrypt buckets
            aren't created yet as we still need to read the unencrypted
            response of the CONNECT request. */
-        if (conn->state == SERF_CONN_SETUP_SSLTUNNEL
-            && conn->completed_requests > conn->completed_responses)
-        {
-            return APR_SUCCESS;
-        }
+        if (conn->state != SERF_CONN_CONNECTED)
+            max_outstanding_requests = 1;
 
-        /* We try to limit the number of in-flight requests so that we
-           don't have to repeat too many if the connection drops.  */
-        if (conn->max_outstanding_requests
-            && (conn->completed_requests - conn->completed_responses
-                >= conn->max_outstanding_requests))
-        {
+        if (max_outstanding_requests &&
+            conn->completed_requests -
+                conn->completed_responses >= max_outstanding_requests) {
             /* backoff for now. */
             return APR_SUCCESS;
         }
@@ -777,9 +755,9 @@ static apr_status_t write_to_connection(serf_connection_t *conn)
              */
             if (APR_STATUS_IS_EAGAIN(status))
                 return APR_SUCCESS;
-            if (APR_STATUS_IS_EPIPE(status)
-                || APR_STATUS_IS_ECONNRESET(status)
-                || APR_STATUS_IS_ECONNABORTED(status))
+            if (APR_STATUS_IS_EPIPE(status) ||
+                APR_STATUS_IS_ECONNRESET(status) ||
+                APR_STATUS_IS_ECONNABORTED(status))
                 return no_more_writes(conn);
             if (status)
                 return status;
@@ -802,7 +780,7 @@ static apr_status_t write_to_connection(serf_connection_t *conn)
             return APR_SUCCESS;
         }
 
-        status = prepare_conn_streams(conn, &ostreamt, &ostreamh);
+        status = prepare_conn_streams(conn, &conn->stream, &ostreamt, &ostreamh);
         if (status) {
             return status;
         }
@@ -869,10 +847,12 @@ static apr_status_t write_to_connection(serf_connection_t *conn)
              */
             if (APR_STATUS_IS_EAGAIN(status))
                 return APR_SUCCESS;
-            if (APR_STATUS_IS_EPIPE(status)
-                || APR_STATUS_IS_ECONNRESET(status)
-                || APR_STATUS_IS_ECONNABORTED(status))
+            if (APR_STATUS_IS_EPIPE(status))
                 return no_more_writes(conn);
+            if (APR_STATUS_IS_ECONNRESET(status) ||
+                APR_STATUS_IS_ECONNABORTED(status)) {
+                return no_more_writes(conn);
+            }
             if (status)
                 return status;
         }
@@ -926,6 +906,7 @@ static apr_status_t write_to_connection(serf_connection_t *conn)
 static apr_status_t handle_response(serf_request_t *request,
                                     apr_pool_t *pool)
 {
+    apr_status_t status = APR_SUCCESS;
     int consumed_response = 0;
 
     /* Only enable the new authentication framework if the program has
@@ -935,14 +916,21 @@ static apr_status_t handle_response(serf_request_t *request,
      * themselves by not registering credential callbacks.
      */
     if (request->conn->ctx->cred_cb) {
-        apr_status_t status;
+      status = serf__handle_auth_response(&consumed_response,
+                                          request,
+                                          request->resp_bkt,
+                                          request->handler_baton,
+                                          pool);
 
-        status = serf__handle_auth_response(&consumed_response,
-                                            request,
-                                            request->resp_bkt,
-                                            pool);
-        if (status)
-            return status;
+      /* If there was an error reading the response (maybe there wasn't
+         enough data available), don't bother passing the response to the
+         application.
+
+         If the authentication was tried, but failed, pass the response
+         to the application, maybe it can do better. */
+      if (status) {
+          return status;
+      }
     }
 
     if (!consumed_response) {
@@ -952,7 +940,7 @@ static apr_status_t handle_response(serf_request_t *request,
                                    pool);
     }
 
-    return APR_SUCCESS;
+    return status;
 }
 
 /* An async response message was received from the server. */
@@ -984,7 +972,7 @@ apr_status_t
 serf__provide_credentials(serf_context_t *ctx,
                           char **username,
                           char **password,
-                          serf_request_t *request,
+                          serf_request_t *request, void *baton,
                           int code, const char *authn_type,
                           const char *realm,
                           apr_pool_t *pool)
@@ -1053,7 +1041,7 @@ static apr_status_t read_from_connection(serf_connection_t *conn)
     /* assert: request != NULL */
 
     if ((status = apr_pool_create(&tmppool, conn->pool)) != APR_SUCCESS)
-        return status;
+        goto error;
 
     /* Invoke response handlers until we have no more work. */
     while (1) {
@@ -1062,7 +1050,7 @@ static apr_status_t read_from_connection(serf_connection_t *conn)
         apr_pool_clear(tmppool);
 
         /* Only interested in the input stream here. */
-        status = prepare_conn_streams(conn, &dummy1, &dummy2);
+        status = prepare_conn_streams(conn, &conn->stream, &dummy1, &dummy2);
         if (status) {
             goto error;
         }
@@ -1137,11 +1125,6 @@ static apr_status_t read_from_connection(serf_connection_t *conn)
 
         status = handle_response(request, tmppool);
 
-        /* If we received APR_SUCCESS, run this loop again. */
-        if (!status) {
-            continue;
-        }
-
         /* Some systems will not generate a HUP poll event so we have to
          * handle the ECONNRESET issue and ECONNABORT here.
          */
@@ -1175,6 +1158,11 @@ static apr_status_t read_from_connection(serf_connection_t *conn)
             }
             status = APR_SUCCESS;
             goto error;
+        }
+
+        /* If we received APR_SUCCESS, run this loop again. */
+        if (!status) {
+            continue;
         }
 
         close_connection = is_conn_closing(request->resp_bkt);
@@ -1297,29 +1285,8 @@ apr_status_t serf__process_connection(serf_connection_t *conn,
                 int error;
                 apr_socklen_t l = sizeof(error);
 
-                if (!getsockopt(osskt, SOL_SOCKET, SO_ERROR, (char*)&error,
-                                &l)) {
-                    status = APR_FROM_OS_ERROR(error);
-
-                    /* Handle fallback for multi-homed servers.
-                     
-                       ### Improve algorithm to find better than just 'next'?
-
-                       Current Windows versions already handle re-ordering for
-                       api users by using statistics on the recently failed
-                       connections to order the list of addresses. */
-                    if (conn->completed_requests == 0
-                        && conn->address->next != NULL
-                        && (APR_STATUS_IS_ECONNREFUSED(status)
-                            || APR_STATUS_IS_TIMEUP(status)
-                            || APR_STATUS_IS_ENETUNREACH(status))) {
-
-                        conn->address = conn->address->next;
-                        return reset_connection(conn, 1);
-                    }
-
-                    return status;
-                  }
+                if (!getsockopt(osskt, SOL_SOCKET, SO_ERROR, (char*)&error, &l))
+                    return APR_FROM_OS_ERROR(error);
             }
         }
 #endif
@@ -1640,17 +1607,6 @@ serf_request_t *serf__ssltunnel_request_create(serf_connection_t *conn,
                                    setup, setup_baton);
 }
 
-
-serf_request_t *serf__request_requeue(const serf_request_t *request)
-{
-    /* ### in the future, maybe we could reset REQUEST and try again?  */
-    return priority_request_create(request->conn,
-                                   request->ssltunnel,
-                                   request->setup,
-                                   request->setup_baton);
-}
-
-
 apr_status_t serf_request_cancel(serf_request_t *request)
 {
     return cancel_request(request, &request->conn->requests, 0);
@@ -1701,47 +1657,55 @@ serf_bucket_t *serf_request_bucket_request_create(
     serf_bucket_t *body,
     serf_bucket_alloc_t *allocator)
 {
-    serf_bucket_t *req_bkt;
-    serf_bucket_t *hdrs_bkt;
+    serf_bucket_t *req_bkt, *hdrs_bkt;
     serf_connection_t *conn = request->conn;
     serf_context_t *ctx = conn->ctx;
-    int tunneled;
-    serf__authn_info_t *authn_info;
+    int ssltunnel;
 
-    tunneled = ctx->proxy_address
-               && (strcmp(conn->host_info.scheme, "https") == 0);
+    ssltunnel = ctx->proxy_address &&
+                (strcmp(conn->host_info.scheme, "https") == 0);
 
     req_bkt = serf_bucket_request_create(method, uri, body, allocator);
     hdrs_bkt = serf_bucket_request_get_headers(req_bkt);
 
     /* Use absolute uri's in requests to a proxy. USe relative uri's in
        requests directly to a server or sent through an SSL tunnel. */
-    if (ctx->proxy_address && conn->host_url && !tunneled)
-    {
+    if (ctx->proxy_address && conn->host_url &&
+        !(ssltunnel && !request->ssltunnel)) {
+
         serf_bucket_request_set_root(req_bkt, conn->host_url);
     }
 
     if (conn->host_info.hostinfo)
-    {
-        serf_bucket_headers_setn(hdrs_bkt, "Host",  conn->host_info.hostinfo);
+        serf_bucket_headers_setn(hdrs_bkt, "Host",
+                                 conn->host_info.hostinfo);
+
+    /* Setup server authorization headers, unless this is a CONNECT request. */
+    if (!request->ssltunnel) {
+        serf__authn_info_t *authn_info;
+        authn_info = serf__get_authn_info_for_server(conn);
+        if (authn_info->scheme)
+            authn_info->scheme->setup_request_func(HOST, 0, conn, request,
+                                                   method, uri,
+                                                   hdrs_bkt);
     }
 
-    /* Setup server authentication headers.  */
-    authn_info = serf__get_authn_info_for_server(conn);
-    if (authn_info->scheme)
-    {
-        authn_info->scheme->setup_request_func(HOST, 0, conn, request,
-                                               method, uri,
-                                               hdrs_bkt);
-    }
-
-    /* Setup proxy authentication headers, unless we're tunneling.  */
-    if (ctx->proxy_authn_info.scheme && !tunneled)
-    {
-        ctx->proxy_authn_info.scheme->setup_request_func(PROXY, 0, conn,
-                                                         request,
-                                                         method, uri,
-                                                         hdrs_bkt);
+    /* Setup proxy authorization headers.
+       Don't set these headers on the requests to the server if we're using
+       an SSL tunnel, only on the CONNECT request to setup the tunnel. */
+    if (ctx->proxy_authn_info.scheme) {
+        if (strcmp(conn->host_info.scheme, "https") == 0) {
+            if (request->ssltunnel)
+                ctx->proxy_authn_info.scheme->setup_request_func(PROXY, 0, conn,
+                                                                 request,
+                                                                 method, uri,
+                                                                 hdrs_bkt);
+        } else {
+            ctx->proxy_authn_info.scheme->setup_request_func(PROXY, 0, conn,
+                                                             request,
+                                                             method, uri,
+                                                             hdrs_bkt);
+        }
     }
 
     return req_bkt;

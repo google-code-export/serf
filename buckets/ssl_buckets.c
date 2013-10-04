@@ -52,6 +52,14 @@
 #include <openssl/pkcs12.h>
 #include <openssl/x509v3.h>
 
+#ifndef APR_VERSION_AT_LEAST /* Introduced in APR 1.3.0 */
+#define APR_VERSION_AT_LEAST(major,minor,patch)                           \
+    (((major) < APR_MAJOR_VERSION)                                        \
+      || ((major) == APR_MAJOR_VERSION && (minor) < APR_MINOR_VERSION)    \
+      || ((major) == APR_MAJOR_VERSION && (minor) == APR_MINOR_VERSION && \
+               (patch) <= APR_PATCH_VERSION))
+#endif /* APR_VERSION_AT_LEAST */
+
 #ifndef APR_ARRAY_PUSH
 #define APR_ARRAY_PUSH(ary,type) (*((type *)apr_array_push(ary)))
 #endif
@@ -779,6 +787,8 @@ static apr_status_t ssl_encrypt(void *baton, apr_size_t bufsize,
                 serf__log(SSL_VERBOSE, __FILE__,
                           "ssl_encrypt: bucket read %d bytes; "\
                           "status %d\n", interim_len, status);
+                serf__log(SSL_MSG_VERBOSE, __FILE__, "---\n%.*s\n-(%d)-\n",
+                          interim_len, vecs_data, interim_len);
 
                 /* Stash our status away. */
                 ctx->encrypt.status = status;
@@ -832,10 +842,6 @@ static apr_status_t ssl_encrypt(void *baton, apr_size_t bufsize,
                 } else {
                     /* We're done with this data. */
                     serf_bucket_mem_free(ctx->allocator, vecs_data);
-
-                    serf__log(SSL_MSG_VERBOSE, __FILE__, "---\n%.*s\n-(%d)-\n",
-                              interim_len, vecs_data, interim_len);
-
                 }
             }
         }
@@ -1016,8 +1022,6 @@ static int ssl_need_client_cert(SSL *ssl, X509 **cert, EVP_PKEY **pkey)
 {
     serf_ssl_context_t *ctx = SSL_get_app_data(ssl);
     apr_status_t status;
-
-    serf__log(SSL_VERBOSE, __FILE__, "Server requests a client certificate.\n");
 
     if (ctx->cached_cert) {
         *cert = ctx->cached_cert;
@@ -1521,14 +1525,13 @@ apr_hash_t *serf_ssl_cert_certificate(
     apr_pool_t *pool)
 {
     apr_hash_t *tgt = apr_hash_make(pool);
-    unsigned int md_size;
+    unsigned int md_size, i;
     unsigned char md[EVP_MAX_MD_SIZE];
     BIO *bio;
     STACK_OF(GENERAL_NAME) *names;
 
     /* sha1 fingerprint */
     if (X509_digest(cert->ssl_cert, EVP_sha1(), md, &md_size)) {
-        unsigned int i;
         const char hex[] = "0123456789ABCDEF";
         char fingerprint[EVP_MAX_MD_SIZE * 3];
 
@@ -1573,14 +1576,13 @@ apr_hash_t *serf_ssl_cert_certificate(
     names = X509_get_ext_d2i(cert->ssl_cert, NID_subject_alt_name, NULL, NULL);
     if (names) {
         int names_count = sk_GENERAL_NAME_num(names);
-        int name_idx;
 
         apr_array_header_t *san_arr = apr_array_make(pool, names_count,
                                                      sizeof(char*));
         apr_hash_set(tgt, "subjectAltName", APR_HASH_KEY_STRING, san_arr);
-        for (name_idx = 0; name_idx < names_count; name_idx++) {
+        for (i = 0; i < names_count; i++) {
             char *p = NULL;
-            GENERAL_NAME *nm = sk_GENERAL_NAME_value(names, name_idx);
+            GENERAL_NAME *nm = sk_GENERAL_NAME_value(names, i);
 
             switch (nm->type) {
             case GEN_DNS:

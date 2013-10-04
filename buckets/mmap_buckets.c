@@ -103,20 +103,8 @@ static apr_status_t serf_mmap_peek(serf_bucket_t *bucket,
                                      const char **data,
                                      apr_size_t *len)
 {
-    mmap_context_t *ctx = bucket->data;
-
-    /* return whatever we have left */
-    apr_mmap_offset((void**)data, ctx->mmap, ctx->offset);
-    *len = ctx->remaining;
-
-    /* we returned everything this bucket will ever hold */
-    return APR_EOF;
-}
-
-static apr_uint64_t serf_mmap_get_remaining(serf_bucket_t *bucket)
-{
-    mmap_context_t *ctx = bucket->data;
-    return ctx->remaining;
+    /* Oh, bah. */
+    return APR_ENOTIMPL;
 }
 
 const serf_bucket_type_t serf_bucket_type_mmap = {
@@ -125,11 +113,9 @@ const serf_bucket_type_t serf_bucket_type_mmap = {
     serf_mmap_readline,
     serf_default_read_iovec,
     serf_default_read_for_sendfile,
-    serf_buckets_are_v2,
+    serf_default_read_bucket,
     serf_mmap_peek,
     serf_default_destroy_and_data,
-    serf_default_read_bucket,
-    serf_mmap_get_remaining,
 };
 
 #else /* !APR_HAS_MMAP */

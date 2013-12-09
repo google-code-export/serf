@@ -138,7 +138,7 @@ serf__spnego_create_sec_context(serf__spnego_context_t **ctx_p,
     else
         sspi_package = "NTLM";
 
-    sspi_status = AcquireCredentialsHandleA(
+    sspi_status = AcquireCredentialsHandle(
         NULL, sspi_package, SECPKG_CRED_OUTBOUND,
         NULL, NULL, NULL, NULL,
         &ctx->sspi_credentials, NULL);
@@ -192,8 +192,7 @@ serf__spnego_reset_sec_context(serf__spnego_context_t *ctx)
 }
 
 apr_status_t
-serf__spnego_init_sec_context(serf_connection_t *conn,
-                              serf__spnego_context_t *ctx,
+serf__spnego_init_sec_context(serf__spnego_context_t *ctx,
                               const char *service,
                               const char *hostname,
                               serf__spnego_buffer_t *input_buf,
@@ -220,7 +219,7 @@ serf__spnego_init_sec_context(serf_connection_t *conn,
         ctx->target_name = apr_pstrcat(scratch_pool, service, "/", canonname,
                                        NULL);
 
-        serf__log(LOGLVL_DEBUG, LOGCOMP_AUTHN, __FILE__, conn->config,
+        serf__log(AUTH_VERBOSE, __FILE__,
                   "Using SPN '%s' for '%s'\n", ctx->target_name, hostname);
     }
     else if (ctx->authn_type == SERF_AUTHN_NTLM)
@@ -247,7 +246,7 @@ serf__spnego_init_sec_context(serf_connection_t *conn,
     sspi_out_buffer_desc.pBuffers = &sspi_out_buffer;
     sspi_out_buffer_desc.ulVersion = SECBUFFER_VERSION;
 
-    status = InitializeSecurityContextA(
+    status = InitializeSecurityContext(
         &ctx->sspi_credentials,
         ctx->initalized ? &ctx->sspi_context : NULL,
         ctx->target_name,

@@ -41,6 +41,15 @@ static apr_status_t socket_reader(void *baton, apr_size_t bufsize,
     *len = bufsize;
     status = apr_socket_recv(ctx->skt, buf, len);
 
+    if (status && !APR_STATUS_IS_EAGAIN(status))
+        serf__log_skt(SOCK_VERBOSE, __FILE__, ctx->skt,
+                      "socket_recv error %d\n", status);
+
+    if (*len)
+        serf__log_skt(SOCK_MSG_VERBOSE, __FILE__, ctx->skt,
+                      "--- socket_recv:\n%.*s\n-(%d)-\n",
+                      *len, buf, *len);
+
     if (ctx->progress_func && *len)
         ctx->progress_func(ctx->progress_baton, *len, 0);
 
@@ -110,10 +119,7 @@ const serf_bucket_type_t serf_bucket_type_socket = {
     serf_socket_readline,
     serf_default_read_iovec,
     serf_default_read_for_sendfile,
-    serf_buckets_are_v2,
+    serf_default_read_bucket,
     serf_socket_peek,
     serf_default_destroy_and_data,
-    serf_default_read_bucket,
-    NULL,
-    serf_default_ignore_config,
 };

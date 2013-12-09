@@ -37,7 +37,6 @@ typedef struct header_list {
 
 typedef struct {
     header_list_t *list;
-    header_list_t *last;
 
     header_list_t *cur_read;
     enum {
@@ -61,7 +60,6 @@ serf_bucket_t *serf_bucket_headers_create(
 
     ctx = serf_bucket_mem_alloc(allocator, sizeof(*ctx));
     ctx->list = NULL;
-    ctx->last = NULL;
     ctx->state = READ_START;
 
     return serf_bucket_create(&serf_bucket_type_headers, allocator, ctx);
@@ -73,6 +71,7 @@ void serf_bucket_headers_setx(
     const char *value, apr_size_t value_size, int value_copy)
 {
     headers_context_t *ctx = bkt->data;
+    header_list_t *iter = ctx->list;
     header_list_t *hdr;
 
 #if 0
@@ -106,12 +105,13 @@ void serf_bucket_headers_setx(
     }
 
     /* Add the new header at the end of the list. */
-    if (ctx->last)
-        ctx->last->next = hdr;
+    while (iter && iter->next) {
+        iter = iter->next;
+    }
+    if (iter)
+        iter->next = hdr;
     else
         ctx->list = hdr;
-
-    ctx->last = hdr;
 }
 
 void serf_bucket_headers_set(
@@ -157,9 +157,6 @@ const char *serf_bucket_headers_get(
     while (found) {
         if (strcasecmp(found->header, header) == 0) {
             if (val) {
-                /* ### this is BROKEN. the caller doesn't know that it should
-                   ### free the result.  */
-
                 /* The header is already present.  RFC 2616, section 4.2
                    indicates that we should append the new value, separated by
                    a comma.  Reasoning: for headers whose values are known to

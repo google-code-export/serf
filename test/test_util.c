@@ -389,7 +389,6 @@ test_helper_run_requests_no_check(CuTest *tc, test_baton_t *tb,
     apr_pool_t *iter_pool;
     int i, done = 0;
     apr_status_t status;
-    apr_time_t finish_time = apr_time_now() + apr_time_from_sec(15);
 
     apr_pool_create(&iter_pool, pool);
 
@@ -420,9 +419,6 @@ test_helper_run_requests_no_check(CuTest *tc, test_baton_t *tb,
         done = 1;
         for (i = 0; i < num_requests; i++)
             done &= handler_ctx[i].done;
-
-        if (!done && (apr_time_now() > finish_time))
-          return APR_ETIMEDOUT;
     }
     apr_pool_destroy(iter_pool);
 
@@ -613,77 +609,4 @@ create_new_request_with_resp_hdlr(test_baton_t *tb,
     serf_connection_request_create(tb->connection,
                                    setup_request,
                                    handler_ctx);
-}
-
-static void log_time()
-{
-    apr_time_exp_t tm;
-
-    apr_time_exp_lt(&tm, apr_time_now());
-    fprintf(stderr, "%d-%02d-%02dT%02d:%02d:%02d.%06d%+03d ",
-            1900 + tm.tm_year, 1 + tm.tm_mon, tm.tm_mday,
-            tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_usec,
-            tm.tm_gmtoff/3600);
-}
-
-void test__log(int verbose_flag, const char *filename, const char *fmt, ...)
-{
-    va_list argp;
-
-    if (verbose_flag) {
-        log_time();
-
-        if (filename)
-            fprintf(stderr, "%s: ", filename);
-
-        va_start(argp, fmt);
-        vfprintf(stderr, fmt, argp);
-        va_end(argp);
-    }
-}
-
-void test__log_nopref(int verbose_flag, const char *fmt, ...)
-{
-    va_list argp;
-
-    if (verbose_flag) {
-        va_start(argp, fmt);
-        vfprintf(stderr, fmt, argp);
-        va_end(argp);
-    }
-}
-
-void test__log_skt(int verbose_flag, const char *filename, apr_socket_t *skt,
-                   const char *fmt, ...)
-{
-    va_list argp;
-
-    if (verbose_flag) {
-        apr_sockaddr_t *sa;
-        log_time();
-
-        if (skt) {
-            /* Log local and remote ip address:port */
-            fprintf(stderr, "[l:");
-            if (apr_socket_addr_get(&sa, APR_LOCAL, skt) == APR_SUCCESS) {
-                char buf[32];
-                apr_sockaddr_ip_getbuf(buf, 32, sa);
-                fprintf(stderr, "%s:%d", buf, sa->port);
-            }
-            fprintf(stderr, " r:");
-            if (apr_socket_addr_get(&sa, APR_REMOTE, skt) == APR_SUCCESS) {
-                char buf[32];
-                apr_sockaddr_ip_getbuf(buf, 32, sa);
-                fprintf(stderr, "%s:%d", buf, sa->port);
-            }
-            fprintf(stderr, "] ");
-        }
-
-        if (filename)
-            fprintf(stderr, "%s: ", filename);
-
-        va_start(argp, fmt);
-        vfprintf(stderr, fmt, argp);
-        va_end(argp);
-    }
 }

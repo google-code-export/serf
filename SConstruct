@@ -103,9 +103,6 @@ opts.AddVariables(
   BoolVariable('APR_STATIC',
                "Enable using a static compiled APR",
                False),
-  BoolVariable('DISABLE_LOGGING',
-               "Disable the logging framework at compile time",
-               False),
   RawListVariable('CC', "Command name or path of the C compiler", None),
   RawListVariable('CFLAGS', "Extra flags for the C compiler (space-separated)",
                   None),
@@ -196,7 +193,6 @@ if gssapi and os.path.isdir(gssapi):
 
 debug = env.get('DEBUG', None)
 aprstatic = env.get('APR_STATIC', None)
-disablelogging = env.get('DISABLE_LOGGING', None)
 
 Help(opts.GenerateHelpText(env))
 opts.Save(SAVED_CONFIG, env)
@@ -272,8 +268,6 @@ SHARED_SOURCES = []
 if sys.platform == 'win32':
   env.GenDef(['serf.h','serf_bucket_types.h', 'serf_bucket_util.h'])
   SHARED_SOURCES.append(['serf.def'])
-  dll_res = env.RES(['serf.rc'])
-  SHARED_SOURCES.append(dll_res)
 
 SOURCES = Glob('*.c') + Glob('buckets/*.c') + Glob('auth/*.c')
 
@@ -372,10 +366,6 @@ if gssapi and CALLOUT_OKAY:
 if sys.platform == 'win32':
   env.Append(CPPDEFINES=['SERF_HAVE_SSPI'])
 
-# Set preprocessor define to disable the logging framework
-if disablelogging:
-    env.Append(CPPDEFINES='SERF_DISABLE_LOGGING')
-
 # On some systems, the -R values that APR describes never make it into actual
 # RPATH flags. We'll manually map all directories in LIBPATH into new
 # flags to set RPATH values.
@@ -460,7 +450,6 @@ testall_files = [
         'test/test_context.c',
         'test/test_buckets.c',
         'test/test_auth.c',
-        'test/test_internal.c',
         'test/mock_buckets.c',
         'test/test_ssl.c',
         'test/server/test_server.c',

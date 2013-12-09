@@ -22,7 +22,7 @@ typedef struct {
     apr_file_t *file;
 
     serf_databuf_t databuf;
-    apr_uint64_t remaining;
+
 } file_context_t;
 
 
@@ -39,13 +39,11 @@ serf_bucket_t *serf_bucket_file_create(
     apr_file_t *file,
     serf_bucket_alloc_t *allocator)
 {
-    apr_status_t status;
     file_context_t *ctx;
-    apr_finfo_t finfo;
-
-    status = apr_file_info_get(&finfo, APR_FINFO_SIZE, file);
-
 #if APR_HAS_MMAP
+    apr_finfo_t finfo;
+    const char *file_path;
+
     /* See if we'd be better off mmap'ing this file instead.
      *
      * Note that there is a failure case here that we purposely fall through:
@@ -53,7 +51,11 @@ serf_bucket_t *serf_bucket_file_create(
      * versions of APR, we have no way of knowing this - but apr_mmap_create
      * will check for this and return APR_EBADF.
      */
-    if (status == APR_SUCCESS && APR_MMAP_CANDIDATE(finfo.size)) {
+    apr_file_name_get(&file_path, file);
+    apr_stat(&finfo, file_path, APR_FINFO_SIZE,
+             serf_bucket_allocator_get_pool(allocator));
+    if (APR_MMAP_CANDIDATE(finfo.size)) {
+        apr_status_t status;
         apr_mmap_t *file_mmap;
         status = apr_mmap_create(&file_mmap, file, 0, finfo.size,
                                  APR_MMAP_READ,
@@ -73,13 +75,6 @@ serf_bucket_t *serf_bucket_file_create(
     ctx->databuf.read = file_reader;
     ctx->databuf.read_baton = ctx;
 
-    if (status == APR_SUCCESS) {
-        ctx->remaining = finfo.size;
-    }
-    else {
-        ctx->remaining = SERF_LENGTH_UNKNOWN;
-    }
-
     return serf_bucket_create(&serf_bucket_type_file, allocator, ctx);
 }
 
@@ -88,21 +83,8 @@ static apr_status_t serf_file_read(serf_bucket_t *bucket,
                                    const char **data, apr_size_t *len)
 {
     file_context_t *ctx = bucket->data;
-    apr_status_t status;
 
-    status = serf_databuf_read(&ctx->databuf, requested, data, len);
-
-    if (SERF_BUCKET_READ_ERROR(status))
-    {
-        return status;
-    }
-
-    /* Update remaining length if known. */
-    if (ctx->remaining != SERF_LENGTH_UNKNOWN) {
-        ctx->remaining -= *len;
-    }
-
-    return status;
+    return serf_databuf_read(&ctx->databuf, requested, data, len);
 }
 
 static apr_status_t serf_file_readline(serf_bucket_t *bucket,
@@ -110,22 +92,8 @@ static apr_status_t serf_file_readline(serf_bucket_t *bucket,
                                        const char **data, apr_size_t *len)
 {
     file_context_t *ctx = bucket->data;
-    apr_status_t status;
 
-    status = serf_databuf_readline(&ctx->databuf, acceptable, found, data, len);
-
-    if (SERF_BUCKET_READ_ERROR(status))
-    {
-        return status;
-    }
-
-    /* Update remaining length if known. */
-    if (ctx->remaining != SERF_LENGTH_UNKNOWN) {
-        ctx->remaining -= *len;
-    }
-
-    return status;
-
+    return serf_databuf_readline(&ctx->databuf, acceptable, found, data, len);
 }
 
 static apr_status_t serf_file_peek(serf_bucket_t *bucket,
@@ -137,22 +105,13 @@ static apr_status_t serf_file_peek(serf_bucket_t *bucket,
     return serf_databuf_peek(&ctx->databuf, data, len);
 }
 
-static apr_uint64_t serf_file_get_remaining(serf_bucket_t *bucket)
-{
-    file_context_t *ctx = bucket->data;
-    return ctx->remaining;
-}
-
 const serf_bucket_type_t serf_bucket_type_file = {
     "FILE",
     serf_file_read,
     serf_file_readline,
     serf_default_read_iovec,
     serf_default_read_for_sendfile,
-    serf_buckets_are_v2,
+    serf_default_read_bucket,
     serf_file_peek,
     serf_default_destroy_and_data,
-    serf_default_read_bucket,
-    serf_file_get_remaining,
-    serf_default_ignore_config,
 };

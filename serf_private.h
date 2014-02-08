@@ -35,47 +35,18 @@
 #define REQUESTED_MAX (~((apr_size_t)0))
 #endif
 
-#ifndef APR_VERSION_AT_LEAST /* Introduced in APR 1.3.0 */
-#define APR_VERSION_AT_LEAST(major,minor,patch)                           \
-    (((major) < APR_MAJOR_VERSION)                                        \
-      || ((major) == APR_MAJOR_VERSION && (minor) < APR_MINOR_VERSION)    \
-      || ((major) == APR_MAJOR_VERSION && (minor) == APR_MINOR_VERSION && \
-               (patch) <= APR_PATCH_VERSION))
-#endif /* APR_VERSION_AT_LEAST */
-
 #define SERF_IO_CLIENT (1)
 #define SERF_IO_CONN (2)
 #define SERF_IO_LISTENER (3)
 
-/*** Logging facilities ***/
-
-/* Check for the SERF_DISABLE_LOGGING define, as set by scons. */
-#ifndef SERF_DISABLE_LOGGING
-  #define SERF_LOGGING_ENABLED
-#endif
-
-/* Slightly shorter names for internal use. */
-#define LOGLVL_ERROR   SERF_LOG_ERROR
-#define LOGLVL_WARNING SERF_LOG_WARNING
-#define LOGLVL_INFO    SERF_LOG_INFO
-#define LOGLVL_DEBUG   SERF_LOG_DEBUG
-#define LOGLVL_NONE    SERF_LOG_NONE
-
-/* List of components, used as a mask. */
-#define LOGCOMP_ALL_MSG SERF_LOGCOMP_ALL_MSG
-#define LOGCOMP_ALL     SERF_LOGCOMP_ALL
-#define LOGCOMP_SSL     SERF_LOGCOMP_SSL
-#define LOGCOMP_AUTHN   SERF_LOGCOMP_AUTHN
-#define LOGCOMP_CONN    SERF_LOGCOMP_CONN
-#define LOGCOMP_COMPR   SERF_LOGCOMP_COMPR
-
-#define LOGCOMP_RAWMSG  SERF_LOGCOMP_RAWMSG
-#define LOGCOMP_SSLMSG  SERF_LOGCOMP_SSLMSG
-#define LOGCOMP_NONE    SERF_LOGCOMP_NONE
-
-/* TODO: remove before next serf release, FOR TESTING ONLY */
-#define ACTIVE_LOGLEVEL SERF_LOG_NONE
-#define ACTIVE_LOGCOMPS SERF_LOGCOMP_NONE
+/* Internal logging facilities, set flag to 1 to enable console logging for
+   the selected component. */
+#define SSL_VERBOSE 0
+#define SSL_MSG_VERBOSE 0  /* logs decrypted requests and responses. */
+#define SOCK_VERBOSE 0
+#define SOCK_MSG_VERBOSE 0 /* logs bytes received from or written to a socket. */
+#define CONN_VERBOSE 0
+#define AUTH_VERBOSE 0
 
 /* Older versions of APR do not have the APR_VERSION_AT_LEAST macro. Those
    implementations are safe.
@@ -152,80 +123,9 @@ typedef struct serf__authn_info_t {
     int failed_authn_types;
 } serf__authn_info_t;
 
-/*** Configuration store declarations ***/
-
-struct serf_config_t {
-    /* Pool for per-connection configuration values */
-    apr_pool_t *conn_pool;
-    /* Pool for per-host and per-context configuration values */
-    apr_pool_t *ctx_pool;
-
-
-    /* Configuration key/value pairs per context */
-    apr_hash_t *per_context;
-    /* Configuration key/value pairs per host */
-    apr_hash_t *per_host;
-    /* Configuration key/value pairs per connection */
-    apr_hash_t *per_conn;
-};
-
-typedef struct serf__config_store_t {
-    apr_pool_t *pool;
-
-    /* Configuration key/value pairs per context */
-    apr_hash_t *per_context;
-
-    /* Configuration per host, dual-layered:
-     Key: hostname:port
-     Value: hash table of per host key/value pairs
-     */
-    apr_hash_t *per_host;
-
-    /* Configuration per connection, dual-layered:
-     Key: string(connection ptr) (?)
-     Value: hash table of per host key/value pairs
-     */
-    apr_hash_t *per_conn;
-
-} serf__config_store_t;
-
-/* Initializes the data structures used by the configuration store */
-apr_status_t serf__config_store_init(serf_context_t *ctx);
-
-/* Returns a config object, which is a read/write view on the configuration
-   store. This view is limited to:
-   - all per context configuration
-   - per host configuration (host as defined in CONN)
-   - per connection configuration
-
-   If CONN is NULL, only the per context configuration will be available.
-
-   The host and connection entries will be created in the configuration store
-   when not existing already.
-
-   The config object will be allocated in OUT_POOL. The config object's
-   lifecycle cannot extend beyond that of the serf context!
- */
-apr_status_t serf__config_store_get_config(serf_context_t *ctx,
-                                           serf_connection_t *conn,
-                                           serf_config_t **config,
-                                           apr_pool_t *out_pool);
-
-/* Cleans up all connection specific configuration values */
-apr_status_t
-serf__config_store_remove_connection(serf__config_store_t config_store,
-                                     serf_connection_t *conn);
-
-/* Cleans up all host specific configuration values */
-apr_status_t
-serf__config_store_remove_host(serf__config_store_t config_store,
-                               const char *hostname_port);
-
 struct serf_context_t {
     /* the pool used for self and for other allocations */
     apr_pool_t *pool;
-
-    serf__config_store_t config_store;
 
     void *pollset_baton;
     serf_socket_add_t pollset_add;
@@ -261,9 +161,7 @@ struct serf_context_t {
     /* List of authn types supported by the client.*/
     int authn_types;
     /* Callback function used to get credentials for a realm. */
-    serf_credentials_callback_t cred_cb;
-
-    serf_config_t *config;
+    serf_credentials_callback_t cred_cb; 
 };
 
 struct serf_listener_t {
@@ -383,9 +281,6 @@ struct serf_connection_t {
 
     /* Needs to read first before we can write again. */
     int stop_writing;
-
-    /* Configuration shared with buckets and authn plugins */
-    serf_config_t *config;
 };
 
 /*** Internal bucket functions ***/
@@ -421,6 +316,7 @@ typedef apr_status_t
                              serf_bucket_t *response,
                              const char *auth_hdr,
                              const char *auth_attr,
+                             void *baton,
                              apr_pool_t *pool);
 
 /**
@@ -511,6 +407,7 @@ struct serf__authn_scheme_t {
 apr_status_t serf__handle_auth_response(int *consumed_response,
                                         serf_request_t *request,
                                         serf_bucket_t *response,
+                                        void *baton,
                                         apr_pool_t *pool);
 
 /* Get the cached serf__authn_info_t object for the target server, or create one
@@ -541,37 +438,28 @@ apr_status_t serf__provide_credentials(serf_context_t *ctx,
                                        char **username,
                                        char **password,
                                        serf_request_t *request,
+                                       void *baton,
                                        int code, const char *authn_type,
                                        const char *realm,
                                        apr_pool_t *pool);
-
-/* Requeue a request (at the front).  */
-serf_request_t *serf__request_requeue(const serf_request_t *request);
 
 /* from ssltunnel.c */
 apr_status_t serf__ssltunnel_connect(serf_connection_t *conn);
 
 
-/* Creates a bucket that logs all data returned by one of the read functions
-   of the wrapped bucket. The new bucket will replace the wrapped bucket, so
-   the wrapped ptr will be invalid when this function returns. */
-serf_bucket_t *serf__bucket_log_wrapper_create(serf_bucket_t *wrapped,
-                                               const char *prefix,
-                                               serf_bucket_alloc_t *allocator);
+/** Logging functions. Use one of the [COMP]_VERBOSE flags to enable specific
+    logging. 
+ **/
 
-/** Logging functions. **/
-
-/* Initialize the logging subsystem. This will store a log baton in the 
-   context's configuration store. */
-apr_status_t serf__log_init(serf_context_t *ctx);
+/* Logs a standard event, with filename & timestamp header */
+void serf__log(int verbose_flag, const char *filename, const char *fmt, ...);
 
 /* Logs a standard event, but without prefix. This is useful to build up
-   log lines in parts. */
-void serf__log_nopref(apr_uint32_t level, apr_uint32_t comp,
-                      serf_config_t *config, const char *fmt, ...);
+ log lines in parts. */
+void serf__log_nopref(int verbose_flag, const char *fmt, ...);
 
-/* Logs an event, uses CONFIG to find out socket related info. */
-void serf__log(apr_uint32_t level, apr_uint32_t comp, const char *filename,
-               serf_config_t *config, const char *fmt, ...);
+/* Logs a socket event, add local and remote ip address:port */
+void serf__log_skt(int verbose_flag, const char *filename, apr_socket_t *skt,
+                   const char *fmt, ...);
 
 #endif

@@ -28,15 +28,12 @@
 /* Add Connection: close header to each request. */
 /* #define CONNECTION_CLOSE_HDR */
 
-typedef struct app_baton_t {
+typedef struct {
     const char *hostinfo;
     int using_ssl;
     int head_request;
     serf_ssl_context_t *ssl_ctx;
-    const char *pem_path;
-    const char *pem_pwd;
     serf_bucket_alloc_t *bkt_alloc;
-    serf_context_t *serf_ctx;
 } app_baton_t;
 
 static void closed_connection(serf_connection_t *conn,
@@ -51,30 +48,6 @@ static void closed_connection(serf_connection_t *conn,
     if (why) {
         abort();
     }
-}
-
-static apr_status_t client_cert_cb(void *data, const char **cert_path)
-{
-    app_baton_t *ctx = data;
-
-    *cert_path = ctx->pem_path;
-
-    return APR_SUCCESS;
-}
-
-static apr_status_t client_cert_pw_cb(void *data,
-                                      const char *cert_path,
-                                      const char **password)
-{
-    app_baton_t *ctx = data;
-
-    if (strcmp(cert_path, ctx->pem_path) == 0)
-    {
-        *password = ctx->pem_pwd;
-        return APR_SUCCESS;
-    }
-
-    return APR_EGENERAL;
 }
 
 static void print_ssl_cert_errors(int failures)
@@ -179,8 +152,7 @@ static apr_status_t conn_setup(apr_socket_t *skt,
     serf_bucket_t *c;
     app_baton_t *ctx = setup_baton;
 
-    c = serf_context_bucket_socket_create(ctx->serf_ctx, skt,
-                                          ctx->bkt_alloc);
+    c = serf_bucket_socket_create(skt, ctx->bkt_alloc);
     if (ctx->using_ssl) {
         c = serf_bucket_ssl_decrypt_create(c, ctx->ssl_ctx, ctx->bkt_alloc);
         if (!ctx->ssl_ctx) {
@@ -193,19 +165,6 @@ static apr_status_t conn_setup(apr_socket_t *skt,
 
         *output_bkt = serf_bucket_ssl_encrypt_create(*output_bkt, ctx->ssl_ctx,
                                                     ctx->bkt_alloc);
-        if (ctx->pem_path) {
-            serf_ssl_client_cert_provider_set(ctx->ssl_ctx,
-                                              client_cert_cb,
-                                              ctx,
-                                              pool);
-        }
-
-        if (ctx->pem_pwd) {
-            serf_ssl_client_cert_password_set(ctx->ssl_ctx,
-                                              client_cert_pw_cb,
-                                              ctx,
-                                              pool);
-        }
     }
 
     *input_bkt = c;
@@ -237,7 +196,7 @@ static serf_bucket_t* accept_response(serf_request_t *request,
     return response;
 }
 
-typedef struct handler_baton_t {
+typedef struct {
 #if APR_MAJOR_VERSION > 0
     apr_uint32_t completed_requests;
 #else
@@ -433,51 +392,20 @@ credentials_callback(char **username,
     }
 }
 
-/* Value for 'no short code' should be > 255 */
-#define CERTFILE 256
-#define CERTPWD  257
-
-static const apr_getopt_option_t options[] =
-{
-
-    {"help",    'h', 0, "Display this help"},
-    {NULL,      'v', 0, "Display version"},
-    {NULL,      'H', 0, "Print response headers"},
-    {NULL,      'n', 1, "<count> Fetch URL <count> times"},
-    {NULL,   'x', 1, "<count> Number of maximum outstanding requests inflight"},
-    {"user",    'U', 1, "<user> Username for Basic/Digest authentication"},
-    {"pwd",     'P', 1, "<password> Password for Basic/Digest authentication"},
-    {NULL,      'm', 1, "<method> Use the <method> HTTP Method"},
-    {NULL,      'f', 1, "<file> Use the <file> as the request body"},
-    {NULL,      'p', 1, "<hostname:port> Use the <host:port> as proxy server"},
-    {"cert",    CERTFILE, 1, "<file> Use SSL client certificate <file>"},
-    {"certpwd", CERTPWD, 1, "<password> Password for the SSL client certificate"},
-    {NULL,      'r', 1, "<header:value> Use <header:value> as request header"},
-};
-
 static void print_usage(apr_pool_t *pool)
 {
-    int i;
-
-    puts("serf_get [options] URL\n");
-    puts("Options:");
-
-    for (i = 0; i < sizeof(options) / sizeof(apr_getopt_option_t); i++) {
-        const apr_getopt_option_t* o = &options[i];
-
-        if (o->optch <= 255) {
-            printf(" -%c", o->optch);
-            if (o->name)
-                printf(", ");
-        } else {
-            printf("     ");
-        }
-
-        printf("%s%s\t%s\n",
-               o->name ? "--" : "\t",
-               o->name ? o->name : "",
-               o->description);
-    }
+    puts("serf_get [options] URL");
+    puts("-h\tDisplay this help");
+    puts("-v\tDisplay version");
+    puts("-H\tPrint response headers");
+    puts("-n <count> Fetch URL <count> times");
+    puts("-x <count> Number of maximum outstanding requests inflight");
+    puts("-U <user> Username for Basic/Digest authentication");
+    puts("-P <password> Password for Basic/Digest authentication");
+    puts("-m <method> Use the <method> HTTP Method");
+    puts("-f <file> Use the <file> as the request body");
+    puts("-p <hostname:port> Use the <host:port> as proxy server");
+    puts("-r <header:value> Use <header:value> as request header");
 }
 
 int main(int argc, const char **argv)
@@ -487,6 +415,7 @@ int main(int argc, const char **argv)
     serf_bucket_alloc_t *bkt_alloc;
     serf_context_t *context;
     serf_connection_t *connection;
+    serf_request_t *request;
     app_baton_t app_ctx;
     handler_baton_t handler_ctx;
     serf_bucket_t *req_hdrs = NULL;
@@ -498,9 +427,8 @@ int main(int argc, const char **argv)
     int print_headers;
     const char *username = NULL;
     const char *password = "";
-    const char *pem_path = NULL, *pem_pwd = NULL;
     apr_getopt_t *opt;
-    int opt_c;
+    char opt_c;
     const char *opt_arg;
 
     apr_initialize();
@@ -518,9 +446,9 @@ int main(int argc, const char **argv)
     /* Do not print headers by default. */
     print_headers = 0;
 
-    
     apr_getopt_init(&opt, pool, argc, argv);
-    while ((status = apr_getopt_long(opt, options, &opt_c, &opt_arg)) ==
+
+    while ((status = apr_getopt(opt, "U:P:f:hHm:n:vp:x:r:", &opt_c, &opt_arg)) ==
            APR_SUCCESS) {
 
         switch (opt_c) {
@@ -586,12 +514,6 @@ int main(int argc, const char **argv)
                                          hdr_val, strlen(hdr_val), 1);
             }
             break;
-        case CERTFILE:
-            pem_path = opt_arg;
-            break;
-        case CERTPWD:
-            pem_pwd = opt_arg;
-            break;
         case 'v':
             puts("Serf version: " SERF_VERSION_STRING);
             exit(0);
@@ -630,11 +552,8 @@ int main(int argc, const char **argv)
     }
 
     app_ctx.hostinfo = url.hostinfo;
-    app_ctx.pem_path = pem_path;
-    app_ctx.pem_pwd = pem_pwd;
 
     context = serf_context_create(pool);
-    app_ctx.serf_ctx = context;
 
     if (proxy)
     {
@@ -689,25 +608,6 @@ int main(int argc, const char **argv)
 
     serf_config_credentials_callback(context, credentials_callback);
 
-#if 0
-    /* Setup debug logging */
-    {
-        serf_log_output_t *output;
-        apr_status_t status;
-
-        status = serf_logging_create_stream_output(&output,
-                                                   context,
-                                                   SERF_LOG_DEBUG,
-                                                   SERF_LOGCOMP_ALL_MSG,
-                                                   SERF_LOG_DEFAULT_LAYOUT,
-                                                   stderr,
-                                                   pool);
-
-        if (!status)
-            serf_logging_add_output(context, output);
-    }
-#endif
-
     /* ### Connection or Context should have an allocator? */
     app_ctx.bkt_alloc = bkt_alloc;
     app_ctx.ssl_ctx = NULL;
@@ -724,12 +624,7 @@ int main(int argc, const char **argv)
 
     handler_ctx.completed_requests = 0;
     handler_ctx.print_headers = print_headers;
-
-#if APR_VERSION_AT_LEAST(1, 3, 0)
-    apr_file_open_flags_stdout(&handler_ctx.output_file, APR_BUFFERED, pool);
-#else
     apr_file_open_stdout(&handler_ctx.output_file, pool);
-#endif
 
     handler_ctx.host = url.hostinfo;
     handler_ctx.method = method;
@@ -752,9 +647,8 @@ int main(int argc, const char **argv)
     serf_connection_set_max_outstanding_requests(connection, inflight);
 
     for (i = 0; i < count; i++) {
-        /* We don't need the returned request here. */
-        serf_connection_request_create(connection, setup_request,
-                                       &handler_ctx);
+        request = serf_connection_request_create(connection, setup_request,
+                                                 &handler_ctx);
     }
 
     while (1) {
@@ -779,8 +673,6 @@ int main(int argc, const char **argv)
         /* Debugging purposes only! */
         serf_debug__closed_conn(app_ctx.bkt_alloc);
     }
-
-    apr_file_close(handler_ctx.output_file);
 
     serf_connection_close(connection);
 

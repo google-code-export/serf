@@ -23,7 +23,7 @@
 
 
 /* Structure passed around as baton for the CONNECT request and respone. */
-typedef struct req_ctx_t {
+typedef struct {
     apr_pool_t *pool;
     const char *uri;
 } req_ctx_t;
@@ -110,8 +110,8 @@ static apr_status_t handle_response(serf_request_t *request,
         conn->stream = NULL;
         ctx = NULL;
 
-        serf__log(LOGLVL_INFO, LOGCOMP_CONN, __FILE__, conn->config,
-                  "successfully set up ssl tunnel.\n");
+        serf__log_skt(CONN_VERBOSE, __FILE__, conn->skt,
+                      "successfully set up ssl tunnel.\n");
 
         /* Fix for issue #123: ignore the "Connection: close" header here,
            leaving the header in place would make the serf's main context
@@ -121,7 +121,7 @@ static apr_status_t handle_response(serf_request_t *request,
         hdrs = serf_bucket_response_get_headers(response);
         val = serf_bucket_headers_get(hdrs, "Connection");
         if (val && strcasecmp("close", val) == 0) {
-            serf__log(LOGLVL_DEBUG, LOGCOMP_CONN, __FILE__, conn->config,
+            serf__log_skt(CONN_VERBOSE, __FILE__, conn->skt,
                       "Ignore Connection: close header on this reponse, don't "
                       "close the connection now that the tunnel is set up.\n");
             serf__bucket_headers_remove(hdrs, "Connection");
@@ -146,22 +146,12 @@ static apr_status_t setup_request(serf_request_t *request,
                                   apr_pool_t *pool)
 {
     req_ctx_t *ctx = setup_baton;
-    serf_bucket_t *hdrs_bkt;
 
-    *req_bkt = serf_bucket_request_create("CONNECT", ctx->uri, NULL,
-                                          serf_request_get_alloc(request));
-
-    hdrs_bkt = serf_bucket_request_get_headers(*req_bkt);
-    serf_bucket_headers_setn(hdrs_bkt, "Host", ctx->uri);
-
-    /* If proxy authn is required, then set it up.  */
-    if (request->conn->ctx->proxy_authn_info.scheme)
-        request->conn->ctx->proxy_authn_info.scheme->setup_request_func(
-                                                       PROXY, 0,
-                                                       request->conn, request,
-                                                       "CONNECT", ctx->uri,
-                                                       hdrs_bkt);
-
+    *req_bkt =
+        serf_request_bucket_request_create(request,
+                                           "CONNECT", ctx->uri,
+                                           NULL,
+                                           serf_request_get_alloc(request));
     *acceptor = accept_response;
     *acceptor_baton = ctx;
     *handler = handle_response;
@@ -199,8 +189,8 @@ apr_status_t serf__ssltunnel_connect(serf_connection_t *conn)
                                    ctx);
 
     conn->state = SERF_CONN_SETUP_SSLTUNNEL;
-    serf__log(LOGLVL_DEBUG, LOGCOMP_CONN, __FILE__, conn->config,
-              "setting up ssl tunnel on connection.\n");
+    serf__log_skt(CONN_VERBOSE, __FILE__, conn->skt,
+                  "setting up ssl tunnel on connection.\n");
 
     return APR_SUCCESS;
 }

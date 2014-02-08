@@ -88,7 +88,7 @@ serf_bucket_t *serf_bucket_response_create(
 #define SERF_HTTP_VERSION_MAJOR(shv) ((int)shv / 1000)
 #define SERF_HTTP_VERSION_MINOR(shv) ((int)shv % 1000)
 
-typedef struct serf_status_line {
+typedef struct {
     int version;
     int code;
     const char *reason;
@@ -675,15 +675,6 @@ serf_bucket_t *serf_bucket_iovec_create(
     int len,
     serf_bucket_alloc_t *allocator);
 
-/* ==================================================================== */
-
-extern const serf_bucket_type_t serf_bucket_type_copy;
-#define SERF_BUCKET_IS_COPY(b) SERF_BUCKET_CHECK((b), copy)
-
-serf_bucket_t *serf_bucket_copy_create(
-    serf_bucket_t *wrapped,
-    apr_size_t min_size,
-    serf_bucket_alloc_t *allocator);
 
 /* ==================================================================== */
 

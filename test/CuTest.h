@@ -111,7 +111,7 @@ void CuAssertDblEquals_LineMsg(CuTest* tc,
     double expected, double actual, double delta);
 void CuAssertPtrEquals_LineMsg(CuTest* tc,
     const char* file, int line, const char* message,
-    const void* expected, const void* actual);
+    void* expected, void* actual);
 
 /* public assert functions */
 

@@ -25,14 +25,14 @@
 
 #include "serf.h"
 
-typedef struct app_baton_t {
+typedef struct {
     int count;
     int using_ssl;
     serf_ssl_context_t *ssl_ctx;
     serf_bucket_alloc_t *bkt_alloc;
 } app_baton_t;
 
-typedef struct handler_baton_t {
+typedef struct {
 #if APR_MAJOR_VERSION > 0
     apr_uint32_t requests_outstanding;
 #else
@@ -150,6 +150,7 @@ static apr_status_t setup_request(serf_request_t *request,
 {
     handler_baton_t *ctx = setup_baton;
     serf_bucket_t *hdrs_bkt;
+    serf_bucket_t *body_bkt;
 
     if (ctx->req_body_path) {
         apr_file_t *file;
@@ -162,13 +163,12 @@ static apr_status_t setup_request(serf_request_t *request,
             printf("Error opening file (%s)\n", ctx->req_body_path);
             return status;
         }
-/*
+
         body_bkt = serf_bucket_file_create(file,
                                            serf_request_get_alloc(request));
-*/
     }
     else {
-/*        body_bkt = NULL;*/
+        body_bkt = NULL;
     }
 
     /*
@@ -366,17 +366,18 @@ static apr_status_t handle_bwtp_upgrade(serf_request_t *request,
         if (APR_STATUS_IS_EOF(status)) {
             int i;
             serf_connection_t *conn;
+            serf_request_t *new_req;
 
             conn = serf_request_get_conn(request);
 
             serf_connection_set_async_responses(conn,
                 accept_bwtp, ctx->acceptor_baton, handle_bwtp, NULL);
 
-            serf_connection_request_create(conn, setup_channel, ctx);
+            new_req = serf_connection_request_create(conn, setup_channel, ctx);
             for (i = 0; i < ctx->acceptor_baton->count; i++) {
-                serf_connection_request_create(conn,
-                                               setup_request,
-                                               ctx);
+                new_req = serf_connection_request_create(conn,
+                                                         setup_request,
+                                                         ctx);
             }
 
             return APR_EOF;
@@ -439,9 +440,11 @@ static apr_status_t handle_response(serf_request_t *request,
             apr_atomic_dec32(&ctx->requests_outstanding);
             if (!ctx->requests_outstanding) {
                 serf_connection_t *conn;
+                serf_request_t *new_req;
 
                 conn = serf_request_get_conn(request);
-                serf_connection_request_create(conn, setup_close, ctx);
+                new_req =
+                    serf_connection_request_create(conn, setup_close, ctx);
             }
             return APR_EOF;
         }
@@ -474,6 +477,7 @@ int main(int argc, const char **argv)
     apr_sockaddr_t *address;
     serf_context_t *context;
     serf_connection_t *connection;
+    serf_request_t *request;
     app_baton_t app_ctx;
     handler_baton_t handler_ctx;
     apr_uri_t url;
@@ -598,8 +602,8 @@ int main(int argc, const char **argv)
     handler_ctx.acceptor_baton = &app_ctx;
     handler_ctx.handler = handle_response;
 
-    serf_connection_request_create(connection, setup_bwtp_upgrade,
-                                   &handler_ctx);
+    request = serf_connection_request_create(connection, setup_bwtp_upgrade,
+                                             &handler_ctx);
 
     for (i = 0; i < app_ctx.count; i++) {
         apr_atomic_inc32(&handler_ctx.requests_outstanding);

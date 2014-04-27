@@ -19,7 +19,7 @@
 #include "serf_bucket_util.h"
 
 
-typedef struct barrier_context_t {
+typedef struct {
     serf_bucket_t *stream;
 } barrier_context_t;
 
@@ -85,33 +85,13 @@ static void serf_barrier_destroy(serf_bucket_t *bucket)
     serf_default_destroy_and_data(bucket);
 }
 
-static apr_uint64_t serf_barrier_get_remaining(serf_bucket_t *bucket)
-{
-    barrier_context_t *ctx = bucket->data;
-
-    return serf_bucket_get_remaining(ctx->stream);
-}
-
-static apr_status_t serf_barrier_set_config(serf_bucket_t *bucket,
-                                            serf_config_t *config)
-{
-    /* This bucket doesn't need/update any shared config, but we need to pass
-     it along to our wrapped bucket. */
-    barrier_context_t *ctx = bucket->data;
-
-    return serf_bucket_set_config(ctx->stream, config);
-}
-
 const serf_bucket_type_t serf_bucket_type_barrier = {
     "BARRIER",
     serf_barrier_read,
     serf_barrier_readline,
     serf_barrier_read_iovec,
     serf_default_read_for_sendfile,
-    serf_buckets_are_v2,
+    serf_default_read_bucket,
     serf_barrier_peek,
     serf_barrier_destroy,
-    serf_default_read_bucket,
-    serf_barrier_get_remaining,
-    serf_barrier_set_config,
 };

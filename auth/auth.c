@@ -120,6 +120,7 @@ static apr_status_t discard_body(serf_bucket_t *response)
  * Returns a non-0 value of a matching handler was found.
  */
 static int handle_auth_headers(int code,
+                               void *baton,
                                apr_hash_t *hdrs,
                                serf_request_t *request,
                                serf_bucket_t *response,
@@ -143,8 +144,8 @@ static int handle_auth_headers(int code,
         if (! (ctx->authn_types & scheme->type))
             continue;
 
-        serf__log(LOGLVL_INFO, LOGCOMP_AUTHN, __FILE__, conn->config,
-                  "Client supports: %s\n", scheme->name);
+        serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
+                      "Client supports: %s\n", scheme->name);
 
         auth_hdr = apr_hash_get(hdrs, scheme->key, APR_HASH_KEY_STRING);
 
@@ -167,8 +168,8 @@ static int handle_auth_headers(int code,
 
         handler = scheme->handle_func;
 
-        serf__log(LOGLVL_INFO, LOGCOMP_AUTHN, __FILE__, conn->config,
-                  "... matched: %s\n", scheme->name);
+        serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
+                      "... matched: %s\n", scheme->name);
 
         /* If this is the first time we use this scheme on this context and/or
            this connection, make sure to initialize the authentication handler 
@@ -192,7 +193,7 @@ static int handle_auth_headers(int code,
             }
 
             status = handler(code, request, response,
-                             auth_hdr, auth_attr, ctx->pool);
+                             auth_hdr, auth_attr, baton, ctx->pool);
         }
 
         if (status == APR_SUCCESS)
@@ -202,8 +203,8 @@ static int handle_auth_headers(int code,
            If no more authn schemes are found the status of this scheme will be
            returned.
         */
-        serf__log(LOGLVL_INFO, LOGCOMP_AUTHN, __FILE__, conn->config,
-                  "%s authentication failed.\n", scheme->name);
+        serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
+                      "%s authentication failed.\n", scheme->name);
 
         /* Clear per-request auth_baton when switching to next auth scheme. */
         request->auth_baton = NULL;
@@ -218,7 +219,7 @@ static int handle_auth_headers(int code,
 /**
  * Baton passed to the store_header_in_dict callback function
  */
-typedef struct auth_baton_t {
+typedef struct {
     const char *header;
     apr_pool_t *pool;
     apr_hash_t *hdrs;
@@ -260,42 +261,34 @@ static int store_header_in_dict(void *baton,
 static apr_status_t dispatch_auth(int code,
                                   serf_request_t *request,
                                   serf_bucket_t *response,
+                                  void *baton,
                                   apr_pool_t *pool)
 {
     serf_bucket_t *hdrs;
 
     if (code == 401 || code == 407) {
         auth_baton_t ab = { 0 };
+        const char *auth_hdr;
 
         ab.hdrs = apr_hash_make(pool);
         ab.pool = pool;
 
+        /* Before iterating over all authn headers, check if there are any. */
         if (code == 401)
             ab.header = "WWW-Authenticate";
         else
             ab.header = "Proxy-Authenticate";
 
         hdrs = serf_bucket_response_get_headers(response);
+        auth_hdr = serf_bucket_headers_get(hdrs, ab.header);
 
-#ifdef SERF_LOGGING_ENABLED
-        {
-            const char *auth_hdr;
-
-            /* ### headers_get() doesn't tell us whether to free this result
-               ### or not. but... meh. debug mode.  */
-            auth_hdr = serf_bucket_headers_get(hdrs, ab.header);
-            if (auth_hdr == NULL) {
-                serf__log(LOGLVL_WARNING, LOGCOMP_AUTHN, __FILE__,
-                          request->conn->config,
-                          "%s header missing in response!\n", ab.header);
-            } else {
-                serf__log(LOGLVL_DEBUG, LOGCOMP_AUTHN, __FILE__,
-                          request->conn->config,
-                          "%s authz required. Response header(s): %s\n",
-                          code == 401 ? "Server" : "Proxy", auth_hdr);
-            }
+        if (!auth_hdr) {
+            return SERF_ERROR_AUTHN_FAILED;
         }
-#endif /* SERF_LOGGING_ENABLED */
+        serf__log_skt(AUTH_VERBOSE, __FILE__, request->conn->skt,
+                      "%s authz required. Response header(s): %s\n",
+                      code == 401 ? "Server" : "Proxy", auth_hdr);
+
 
         /* Store all WWW- or Proxy-Authenticate headers in a dictionary.
 
@@ -308,12 +301,10 @@ static apr_status_t dispatch_auth(int code,
         serf_bucket_headers_do(hdrs,
                                store_header_in_dict,
                                &ab);
-        if (apr_hash_count(ab.hdrs) == 0)
-            return SERF_ERROR_AUTHN_FAILED;
 
         /* Iterate over all authentication schemes, in order of decreasing
            security. Try to find a authentication schema the server support. */
-        return handle_auth_headers(code, ab.hdrs,
+        return handle_auth_headers(code, baton, ab.hdrs,
                                    request, response, pool);
     }
 
@@ -325,6 +316,7 @@ static apr_status_t dispatch_auth(int code,
 apr_status_t serf__handle_auth_response(int *consumed_response,
                                         serf_request_t *request,
                                         serf_bucket_t *response,
+                                        void *baton,
                                         apr_pool_t *pool)
 {
     apr_status_t status;
@@ -369,15 +361,22 @@ apr_status_t serf__handle_auth_response(int *consumed_response,
             return status;
         }
 
-        status = dispatch_auth(sl.code, request, response, pool);
+        status = dispatch_auth(sl.code, request, response, baton, pool);
         if (status != APR_SUCCESS) {
             return status;
         }
 
         /* Requeue the request with the necessary auth headers. */
-        /* ### application doesn't know about this request! we just drop it
-           ### on the floor.  */
-        (void) serf__request_requeue(request);
+        /* ### Application doesn't know about this request! */
+        if (request->ssltunnel) {
+            serf__ssltunnel_request_create(request->conn,
+                                           request->setup,
+                                           request->setup_baton);
+        } else {
+            serf_connection_priority_request_create(request->conn,
+                                                    request->setup,
+                                                    request->setup_baton);
+        }
 
         return APR_EOF;
     } else {

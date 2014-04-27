@@ -19,7 +19,7 @@
 #include "serf_bucket_util.h"
 #include "serf_private.h"
 
-typedef struct limit_context_t {
+typedef struct {
     serf_bucket_t *stream;
     apr_uint64_t remaining;
 } limit_context_t;
@@ -115,33 +115,13 @@ static void serf_limit_destroy(serf_bucket_t *bucket)
     serf_default_destroy_and_data(bucket);
 }
 
-static apr_uint64_t serf_limit_get_remaining(serf_bucket_t *bucket)
-{
-    limit_context_t *ctx = bucket->data;
-
-    return ctx->remaining;
-}
-
-static apr_status_t serf_limit_set_config(serf_bucket_t *bucket,
-                                          serf_config_t *config)
-{
-    /* This bucket doesn't need/update any shared config, but we need to pass
-     it along to our wrapped bucket. */
-    limit_context_t *ctx = bucket->data;
-
-    return serf_bucket_set_config(ctx->stream, config);
-}
-
 const serf_bucket_type_t serf_bucket_type_limit = {
     "LIMIT",
     serf_limit_read,
     serf_limit_readline,
     serf_default_read_iovec,
     serf_default_read_for_sendfile,
-    serf_buckets_are_v2,
+    serf_default_read_bucket,
     serf_limit_peek,
     serf_limit_destroy,
-    serf_default_read_bucket,
-    serf_limit_get_remaining,
-    serf_limit_set_config,
 };

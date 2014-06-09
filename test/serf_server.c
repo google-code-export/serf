@@ -25,7 +25,7 @@
 
 #include "serf.h"
 
-typedef struct app_baton_t {
+typedef struct {
     int foo;
 } app_baton_t;
 

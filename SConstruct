@@ -103,9 +103,6 @@ opts.AddVariables(
   BoolVariable('APR_STATIC',
                "Enable using a static compiled APR",
                False),
-  BoolVariable('DISABLE_LOGGING',
-               "Disable the logging framework at compile time",
-               False),
   RawListVariable('CC', "Command name or path of the C compiler", None),
   RawListVariable('CFLAGS', "Extra flags for the C compiler (space-separated)",
                   None),
@@ -196,7 +193,6 @@ if gssapi and os.path.isdir(gssapi):
 
 debug = env.get('DEBUG', None)
 aprstatic = env.get('APR_STATIC', None)
-disablelogging = env.get('DISABLE_LOGGING', None)
 
 Help(opts.GenerateHelpText(env))
 opts.Save(SAVED_CONFIG, env)
@@ -272,8 +268,6 @@ SHARED_SOURCES = []
 if sys.platform == 'win32':
   env.GenDef(['serf.h','serf_bucket_types.h', 'serf_bucket_util.h'])
   SHARED_SOURCES.append(['serf.def'])
-  dll_res = env.RES(['serf.rc'])
-  SHARED_SOURCES.append(dll_res)
 
 SOURCES = Glob('*.c') + Glob('buckets/*.c') + Glob('auth/*.c')
 
@@ -333,37 +327,26 @@ if sys.platform == 'win32':
     env.Append(CPPPATH='$OPENSSL/inc32',
                LIBPATH='$OPENSSL/out32dll')
 else:
+  if os.path.isdir(apr):
+    apr = os.path.join(apr, 'bin', 'apr-1-config')
+    env['APR'] = apr
+  if os.path.isdir(apu):
+    apu = os.path.join(apu, 'bin', 'apu-1-config')
+    env['APU'] = apu
+
+  ### we should use --cc, but that is giving some scons error about an implict
+  ### dependency upon gcc. probably ParseConfig doesn't know what to do with
+  ### the apr-1-config output
   if CALLOUT_OKAY:
-    if os.path.isdir(apr):
-      possible_apr = os.path.join(apr, 'bin', 'apr-2-config')
-      if os.path.isfile(possible_apr):
-        apr = possible_apr
-      else:
-        apr = os.path.join(apr, 'bin', 'apr-1-config')
-      env['APR'] = apr
-
-    apr_version = os.popen(env.subst('$APR --version')).read().strip()
-    apr_major, apr_minor, apr_patch = map(int, apr_version.split('.'))
-
-    if os.path.isdir(apu):
-      apu = os.path.join(apu, 'bin', 'apu-1-config')
-      env['APU'] = apu
-
-    ### we should use --cc, but that is giving some scons error about an implict
-    ### dependency upon gcc. probably ParseConfig doesn't know what to do with
-    ### the apr-1-config output
     env.ParseConfig('$APR --cflags --cppflags --ldflags --includes'
                     ' --link-ld --libs')
-    if apr_major < 2:
-      env.ParseConfig('$APU --ldflags --includes --link-ld --libs')
+    env.ParseConfig('$APU --ldflags --includes --link-ld --libs')
 
-    ### there is probably a better way to run/capture output.
-    ### env.ParseConfig() may be handy for getting this stuff into the build
+  ### there is probably a better way to run/capture output.
+  ### env.ParseConfig() may be handy for getting this stuff into the build
+  if CALLOUT_OKAY:
     apr_libs = os.popen(env.subst('$APR --link-libtool --libs')).read().strip()
-    if apr_major < 2:
-      apu_libs = os.popen(env.subst('$APU --link-libtool --libs')).read().strip()
-    else:
-      apu_libs = ''
+    apu_libs = os.popen(env.subst('$APU --link-libtool --libs')).read().strip()
   else:
     apr_libs = ''
     apu_libs = ''
@@ -382,10 +365,6 @@ if gssapi and CALLOUT_OKAY:
     env.Append(CPPDEFINES='SERF_HAVE_GSSAPI')
 if sys.platform == 'win32':
   env.Append(CPPDEFINES=['SERF_HAVE_SSPI'])
-
-# Set preprocessor define to disable the logging framework
-if disablelogging:
-    env.Append(CPPDEFINES='SERF_DISABLE_LOGGING')
 
 # On some systems, the -R values that APR describes never make it into actual
 # RPATH flags. We'll manually map all directories in LIBPATH into new
@@ -449,12 +428,6 @@ env.Alias('install', ['install-lib', 'install-inc', 'install-pc', ])
 
 tenv = env.Clone()
 
-# MockHTTP requires C99 standard, so use it for the test suite.
-cflags = tenv['CFLAGS']
-tenv.Replace(CFLAGS = [f.replace('-std=c89', '-std=c99') for f in cflags])
-
-tenv.Append(CPPDEFINES='MOCKHTTP_OPENSSL')
-
 TEST_PROGRAMS = [ 'serf_get', 'serf_response', 'serf_request', 'serf_spider',
                   'test_all', 'serf_bwtp' ]
 if sys.platform == 'win32':
@@ -462,13 +435,8 @@ if sys.platform == 'win32':
 else:
   TEST_EXES = [ os.path.join('test', '%s' % (prog)) for prog in TEST_PROGRAMS ]
 
-check_script = env.File('build/check.py').rstr()
-test_dir = env.File('test/test_all.c').rfile().get_dir()
-src_dir = env.File('serf.h').rfile().get_dir()
-test_app = ("%s %s %s %s") % (sys.executable, check_script, test_dir, 'test')
-env.AlwaysBuild(env.Alias('check', TEST_EXES, test_app,
-                          ENV={'PATH' : os.environ['PATH'],
-                               'srcdir' : src_dir}))
+env.AlwaysBuild(env.Alias('check', TEST_EXES, sys.executable + ' build/check.py',
+                          ENV={'PATH' : os.environ['PATH']}))
 
 # Find the (dynamic) library in this directory
 tenv.Replace(RPATH=thisdir)
@@ -482,12 +450,10 @@ testall_files = [
         'test/test_context.c',
         'test/test_buckets.c',
         'test/test_auth.c',
-        'test/test_internal.c',
         'test/mock_buckets.c',
-        'test/mock_sock_buckets.c',
         'test/test_ssl.c',
-        'test/MockHTTPinC/MockHTTP.c',
-        'test/MockHTTPinC/MockHTTP_server.c',
+        'test/server/test_server.c',
+        'test/server/test_sslserver.c',
         ]
 
 for proggie in TEST_EXES:

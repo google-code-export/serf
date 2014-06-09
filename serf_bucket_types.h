@@ -88,7 +88,7 @@ serf_bucket_t *serf_bucket_response_create(
 #define SERF_HTTP_VERSION_MAJOR(shv) ((int)shv / 1000)
 #define SERF_HTTP_VERSION_MINOR(shv) ((int)shv % 1000)
 
-typedef struct serf_status_line {
+typedef struct {
     int version;
     int code;
     const char *reason;
@@ -488,13 +488,12 @@ serf_bucket_t *serf_bucket_limit_create(
 
 
 /* ==================================================================== */
-#define SERF_SSL_CERT_NOTYETVALID        1
-#define SERF_SSL_CERT_EXPIRED            2
-#define SERF_SSL_CERT_UNKNOWNCA          4
-#define SERF_SSL_CERT_SELF_SIGNED        8
-#define SERF_SSL_CERT_UNKNOWN_FAILURE   16
-#define SERF_SSL_CERT_REVOKED           32
-#define SERF_SSL_CERT_UNABLE_TO_GET_CRL 64
+#define SERF_SSL_CERT_NOTYETVALID       1
+#define SERF_SSL_CERT_EXPIRED           2
+#define SERF_SSL_CERT_UNKNOWNCA         4
+#define SERF_SSL_CERT_SELF_SIGNED       8
+#define SERF_SSL_CERT_UNKNOWN_FAILURE  16
+#define SERF_SSL_CERT_REVOKED          32
 
 extern const serf_bucket_type_t serf_bucket_type_ssl_encrypt;
 #define SERF_BUCKET_IS_SSL_ENCRYPT(b) SERF_BUCKET_CHECK((b), ssl_encrypt)
@@ -623,21 +622,6 @@ apr_status_t serf_ssl_trust_cert(
     serf_ssl_context_t *ssl_ctx,
     serf_ssl_certificate_t *cert);
 
-/** 
- * Load a CRL .pem file from @a file_path and enable CRL checking.
- */
-apr_status_t serf_ssl_add_crl_from_file(serf_ssl_context_t *ssl_ctx,
-                                        const char *file_path,
-                                        apr_pool_t *pool);
-
-/**
- * Enable or disable CRL checking of all server certificates.
- * @a enabled = 1 to enable CRL checking, 0 to disable CRL checking.
- * Default = disabled.
- */
-apr_status_t serf_ssl_check_crl(serf_ssl_context_t *ssl_ctx,
-                                int enabled);
-
 /**
  * Enable or disable SSL compression on a SSL session.
  * @a enabled = 1 to enable compression, 0 to disable compression.
@@ -691,15 +675,6 @@ serf_bucket_t *serf_bucket_iovec_create(
     int len,
     serf_bucket_alloc_t *allocator);
 
-/* ==================================================================== */
-
-extern const serf_bucket_type_t serf_bucket_type_copy;
-#define SERF_BUCKET_IS_COPY(b) SERF_BUCKET_CHECK((b), copy)
-
-serf_bucket_t *serf_bucket_copy_create(
-    serf_bucket_t *wrapped,
-    apr_size_t min_size,
-    serf_bucket_alloc_t *allocator);
 
 /* ==================================================================== */
 

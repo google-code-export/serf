@@ -29,7 +29,7 @@
  *   http://bwtp.wikidot.com/
  */
 
-typedef struct frame_context_t {
+typedef struct {
     int channel;
     int open;
     int type; /* 0 = header, 1 = message */ /* TODO enum? */
@@ -39,7 +39,7 @@ typedef struct frame_context_t {
     char req_line[1000];
 } frame_context_t;
 
-typedef struct incoming_context_t {
+typedef struct {
     serf_bucket_t *stream;
     serf_bucket_t *body;        /* Pointer to the stream wrapping the body. */
     serf_bucket_t *headers;     /* holds parsed headers */

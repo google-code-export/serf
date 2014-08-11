@@ -138,7 +138,7 @@ serf__spnego_create_sec_context(serf__spnego_context_t **ctx_p,
     else
         sspi_package = "NTLM";
 
-    sspi_status = AcquireCredentialsHandleA(
+    sspi_status = AcquireCredentialsHandle(
         NULL, sspi_package, SECPKG_CRED_OUTBOUND,
         NULL, NULL, NULL, NULL,
         &ctx->sspi_credentials, NULL);
@@ -168,23 +168,7 @@ get_canonical_hostname(const char **canonname,
     }
 
     if (addrinfo) {
-        /* We got the canonical name and address. Try to perform
-         * reverse DNS lookup to find the true hostname.
-         * This is how MIT KRB works by default.*/
-        char rdnshost[NI_MAXHOST];
-        int gaierr;
-
-        gaierr = getnameinfo(addrinfo->ai_addr, addrinfo->ai_addrlen,
-                             rdnshost, sizeof(rdnshost),
-                             NULL, 0, NI_NAMEREQD);
-        if (gaierr) {
-            /* Reverse DNS lookup failed -- use canonical name is that case. */
-            *canonname = apr_pstrdup(pool, addrinfo->ai_canonname);
-        }
-        else {
-            /* We got the hostname -- use it for SPN. */
-            *canonname = apr_pstrdup(pool, rdnshost);
-        }
+        *canonname = apr_pstrdup(pool, addrinfo->ai_canonname);
     }
     else {
         *canonname = apr_pstrdup(pool, hostname);
@@ -236,8 +220,8 @@ serf__spnego_init_sec_context(serf_connection_t *conn,
         ctx->target_name = apr_pstrcat(scratch_pool, service, "/", canonname,
                                        NULL);
 
-        serf__log(LOGLVL_DEBUG, LOGCOMP_AUTHN, __FILE__, conn->config,
-                  "Using SPN '%s' for '%s'\n", ctx->target_name, hostname);
+        serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
+                      "Using SPN '%s' for '%s'\n", ctx->target_name, hostname);
     }
     else if (ctx->authn_type == SERF_AUTHN_NTLM)
     {
@@ -263,7 +247,7 @@ serf__spnego_init_sec_context(serf_connection_t *conn,
     sspi_out_buffer_desc.pBuffers = &sspi_out_buffer;
     sspi_out_buffer_desc.ulVersion = SECBUFFER_VERSION;
 
-    status = InitializeSecurityContextA(
+    status = InitializeSecurityContext(
         &ctx->sspi_credentials,
         ctx->initalized ? &ctx->sspi_context : NULL,
         ctx->target_name,

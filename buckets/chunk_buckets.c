@@ -20,7 +20,7 @@
 #include "serf_bucket_util.h"
 
 
-typedef struct chunk_context_t {
+typedef struct {
     enum {
         STATE_FETCH,
         STATE_CHUNK,
@@ -33,8 +33,6 @@ typedef struct chunk_context_t {
     serf_bucket_t *stream;
 
     char chunk_hdr[20];
-
-    serf_config_t *config;
 } chunk_context_t;
 
 
@@ -100,7 +98,6 @@ static apr_status_t create_chunk(serf_bucket_t *bucket)
          */
         simple_bkt = serf_bucket_simple_copy_create(ctx->chunk_hdr, chunk_len,
                                                     bucket->allocator);
-        serf_bucket_set_config(simple_bkt, ctx->config);
         serf_bucket_aggregate_append(ctx->chunk, simple_bkt);
 
         /* Insert the chunk footer. */
@@ -226,29 +223,13 @@ static void serf_chunk_destroy(serf_bucket_t *bucket)
     serf_default_destroy_and_data(bucket);
 }
 
-static apr_status_t serf_chunk_set_config(serf_bucket_t *bucket,
-                                          serf_config_t *config)
-{
-    chunk_context_t *ctx = bucket->data;
-
-    ctx->config = config;
-
-    /* TODO: status */
-    serf_bucket_set_config(ctx->stream, config);
-
-    return serf_bucket_set_config(ctx->chunk, config);
-}
-
 const serf_bucket_type_t serf_bucket_type_chunk = {
     "CHUNK",
     serf_chunk_read,
     serf_chunk_readline,
     serf_chunk_read_iovec,
     serf_default_read_for_sendfile,
-    serf_buckets_are_v2,
+    serf_default_read_bucket,
     serf_chunk_peek,
     serf_chunk_destroy,
-    serf_default_read_bucket,
-    NULL,
-    serf_chunk_set_config,
 };

@@ -18,7 +18,7 @@
 #include "serf.h"
 #include "serf_bucket_util.h"
 
-typedef struct dechunk_context_t {
+typedef struct {
     serf_bucket_t *stream;
 
     enum {
@@ -28,11 +28,12 @@ typedef struct dechunk_context_t {
         STATE_DONE      /* body is done; we've returned EOF */
     } state;
 
+    /* Buffer for accumulating a chunk size. */
+    serf_linebuf_t linebuf;
+
     /* How much of the chunk, or the terminator, do we have left to read? */
     apr_int64_t body_left;
 
-    /* Buffer for accumulating a chunk size. */
-    serf_linebuf_t linebuf;
 } dechunk_context_t;
 
 
@@ -182,17 +183,6 @@ static apr_status_t serf_dechunk_read(serf_bucket_t *bucket,
     /* NOTREACHED */
 }
 
-static apr_status_t serf_dechunk_set_config(serf_bucket_t *bucket,
-                                            serf_config_t *config)
-{
-    /* This bucket doesn't need/update any shared config, but we need to pass
-     it along to our wrapped bucket. */
-    dechunk_context_t *ctx = bucket->data;
-
-    return serf_bucket_set_config(ctx->stream, config);
-}
-
-
 /* ### need to implement */
 #define serf_dechunk_readline NULL
 #define serf_dechunk_peek NULL
@@ -203,10 +193,7 @@ const serf_bucket_type_t serf_bucket_type_dechunk = {
     serf_dechunk_readline,
     serf_default_read_iovec,
     serf_default_read_for_sendfile,
-    serf_buckets_are_v2,
+    serf_default_read_bucket,
     serf_dechunk_peek,
     serf_dechunk_destroy_and_data,
-    serf_default_read_bucket,
-    NULL,
-    serf_dechunk_set_config,
 };

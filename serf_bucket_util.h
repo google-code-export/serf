@@ -97,14 +97,6 @@ void serf_default_destroy(
 void serf_default_destroy_and_data(
     serf_bucket_t *bucket);
 
-/**
- * Default implementation of the @see set_config functionality.
- *
- * This function will not do anything, it should be used in buckets
- * that have no use for the shared config, and do not wrap other bucket(s).
- */
-apr_status_t serf_default_ignore_config(serf_bucket_t *bucket,
-                                        serf_config_t *config);
 
 /**
  * Allocate @a size bytes of memory using @a allocator.
@@ -228,7 +220,7 @@ typedef apr_status_t (*serf_databuf_reader_t)(
  * This structure should be initialized by calling @see serf_databuf_init.
  * Users should not bother to zero the structure beforehand.
  */
-typedef struct serf_databuf_t {
+typedef struct {
     /** The current data position within the buffer. */
     const char *current;
 

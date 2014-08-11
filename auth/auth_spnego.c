@@ -35,8 +35,6 @@
  **   the server requires Kerberos authn.
  ** - Add a way for serf to give detailed error information back to the
  **   application.
- ** - This file is both GSSAPI and Kerberos/NTLM independent, so update names
- **   and comments.
  **/
 
 /* Authentication over HTTP using Kerberos
@@ -302,9 +300,9 @@ do_auth(peer_t peer,
                 /* Switch to stateless mode, from now on handle authentication
                    of each request with a new gss context. This is easiest to
                    manage when sending requests one by one. */
-                serf__log(LOGLVL_INFO, LOGCOMP_AUTHN, __FILE__, conn->config,
-                          "Server requires per-request SPNEGO authn, "
-                          "switching to (slower) stateless mode.\n");
+                serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
+                              "Server requires per-request SPNEGO authn, "
+                              "switching to stateless mode.\n");
 
                 gss_info->pstate = pstate_stateless;
                 serf_connection_set_max_outstanding_requests(conn, 1);
@@ -318,8 +316,9 @@ do_auth(peer_t peer,
     if (request->auth_baton && !token) {
         /* We provided token with this request, but server responded with empty
            authentication header. This means server rejected our credentials.
-         */
-        return SERF_ERROR_AUTHN_CREDENTIALS_REJECTED;
+           XXX: Probably we need separate error code for this case like
+           SERF_ERROR_AUTHN_CREDS_REJECTED? */
+        return SERF_ERROR_AUTHN_FAILED;
     }
 
     /* If the server didn't provide us with a token, start with a new initial
@@ -405,8 +404,8 @@ serf__init_spnego_connection(const serf__authn_scheme_t *scheme,
     /* Make serf send the initial requests one by one */
     serf_connection_set_max_outstanding_requests(conn, 1);
 
-    serf__log(LOGLVL_DEBUG, LOGCOMP_AUTHN, __FILE__, conn->config,
-              "Initialized Kerberos context for this connection.\n");
+    serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
+                  "Initialized Kerberos context for this connection.\n");
 
     return APR_SUCCESS;
 }
@@ -418,6 +417,7 @@ serf__handle_spnego_auth(int code,
                          serf_bucket_t *response,
                          const char *auth_hdr,
                          const char *auth_attr,
+                         void *baton,
                          apr_pool_t *pool)
 {
     serf_connection_t *conn = request->conn;
@@ -452,8 +452,8 @@ serf__setup_request_spnego_auth(peer_t peer,
        previous response will have created the authn headers for this request
        already. */
     if (gss_info && gss_info->header && gss_info->value) {
-        serf__log(LOGLVL_DEBUG, LOGCOMP_AUTHN, __FILE__, conn->config,
-                  "Set Negotiate authn header on retried request.\n");
+        serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
+                      "Set Negotiate authn header on retried request.\n");
 
         serf_bucket_headers_setn(hdrs_bkt, gss_info->header,
                                  gss_info->value);
@@ -474,15 +474,15 @@ serf__setup_request_spnego_auth(peer_t peer,
             /* We shouldn't normally arrive here, do nothing. */
             break;
         case pstate_undecided: /* fall through */
-            serf__log(LOGLVL_DEBUG, LOGCOMP_AUTHN, __FILE__, conn->config,
-                      "Assume for now that the server supports persistent "
-                      "SPNEGO authentication.\n");
+            serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
+                          "Assume for now that the server supports persistent "
+                          "SPNEGO authentication.\n");
             /* Nothing to do here. */
             break;
         case pstate_stateful:
-            serf__log(LOGLVL_DEBUG, LOGCOMP_AUTHN, __FILE__, conn->config,
-                      "SPNEGO on this connection is persistent, "
-                      "don't set authn header on next request.\n");
+            serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
+                          "SPNEGO on this connection is persistent, "
+                          "don't set authn header on next request.\n");
             /* Nothing to do here. */
             break;
         case pstate_stateless:
@@ -493,8 +493,8 @@ serf__setup_request_spnego_auth(peer_t peer,
                    Add an initial Negotiate token for the server, to bypass the
                    40x response we know we'll otherwise receive.
                   (RFC 4559 section 4.2) */
-                serf__log(LOGLVL_DEBUG, LOGCOMP_AUTHN, __FILE__, conn->config,
-                          "Add initial Negotiate header to request.\n");
+                serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
+                              "Add initial Negotiate header to request.\n");
 
                 status = do_auth(peer,
                                  code,
@@ -526,7 +526,7 @@ serf__setup_request_spnego_auth(peer_t peer,
 /**
  * Baton passed to the get_auth_header callback function.
  */
-typedef struct get_auth_header_baton_t {
+typedef struct {
     const char *hdr_name;
     const char *auth_name;
     const char *hdr_value;
@@ -590,6 +590,14 @@ serf__validate_response_spnego_auth(const serf__authn_scheme_t *scheme,
     gss_authn_info_t *gss_info;
     const char *auth_hdr_name;
 
+    /* TODO: currently this function is only called when a response includes
+       an Authenticate header. This header is optional. If the server does
+       not provide this header on the first 2xx response, we will not promote
+       the connection from undecided to stateful. This won't break anything,
+       but means we stay in non-pipelining mode. */
+    serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
+                  "Validate Negotiate response header.\n");
+
     if (peer == HOST) {
         gss_info = conn->authn_info.baton;
         auth_hdr_name = "WWW-Authenticate";
@@ -602,9 +610,6 @@ serf__validate_response_spnego_auth(const serf__authn_scheme_t *scheme,
         serf_bucket_t *hdrs;
         const char *auth_hdr_val;
         apr_status_t status;
-
-        serf__log(LOGLVL_DEBUG, LOGCOMP_AUTHN, __FILE__, conn->config,
-                  "Validate SPNEGO response header.\n");
 
         hdrs = serf_bucket_response_get_headers(response);
         auth_hdr_val = get_auth_header(hdrs, auth_hdr_name, scheme->name,
@@ -621,8 +626,8 @@ serf__validate_response_spnego_auth(const serf__authn_scheme_t *scheme,
                completed.*/
             gss_info->state = gss_api_auth_completed;
 
-            serf__log(LOGLVL_DEBUG, LOGCOMP_AUTHN, __FILE__, conn->config,
-                      "SPNEGO handshake completed.\n");
+            serf__log_skt(AUTH_VERBOSE, __FILE__, conn->skt,
+                          "SPNEGO handshake completed.\n");
         }
     }
 

@@ -20,13 +20,12 @@
 #include "serf_bucket_util.h"
 
 
-typedef struct request_context_t {
+typedef struct {
     const char *method;
     const char *uri;
     serf_bucket_t *headers;
     serf_bucket_t *body;
     apr_int64_t len;
-    serf_config_t *config;
 } request_context_t;
 
 #define LENGTH_UNKNOWN ((apr_int64_t)-1)
@@ -90,9 +89,13 @@ static void serialize_data(serf_bucket_t *bucket)
 {
     request_context_t *ctx = bucket->data;
     serf_bucket_t *new_bucket;
+    const char *new_data;
     struct iovec iov[4];
+    apr_size_t nbytes;
 
-    /* Create a bucket for the request-line. */
+    /* Serialize the request-line and headers into one mother string,
+     * and wrap a bucket around it.
+     */
     iov[0].iov_base = (char*)ctx->method;
     iov[0].iov_len = strlen(ctx->method);
     iov[1].iov_base = " ";
@@ -102,9 +105,12 @@ static void serialize_data(serf_bucket_t *bucket)
     iov[3].iov_base = " HTTP/1.1\r\n";
     iov[3].iov_len = sizeof(" HTTP/1.1\r\n") - 1;
 
-    new_bucket = serf_bucket_iovec_create(iov, 4, bucket->allocator);
+    /* Create a new bucket for this string with a flat string.  */
+    new_data = serf_bstrcatv(bucket->allocator, iov, 4, &nbytes);
+    new_bucket = serf_bucket_simple_own_create(new_data, nbytes,
+                                               bucket->allocator);
 
-    /* Build up the new bucket structure with the request-line and the headers.
+    /* Build up the new bucket structure.
      *
      * Note that self needs to become an aggregate bucket so that a
      * pointer to self still represents the "right" data.
@@ -184,20 +190,6 @@ static apr_status_t serf_request_peek(serf_bucket_t *bucket,
     return serf_bucket_peek(bucket, data, len);
 }
 
-/* Note that this function is only called when serialize_data()
-   hasn't been called on the bucket */
-static void serf_request_destroy(serf_bucket_t *bucket)
-{
-  request_context_t *ctx = bucket->data;
-
-  serf_bucket_destroy(ctx->headers);
-
-  if (ctx->body)
-    serf_bucket_destroy(ctx->body);
-
-  serf_default_destroy_and_data(bucket);
-}
-
 void serf_bucket_request_become(
     serf_bucket_t *bucket,
     const char *method,
@@ -218,27 +210,14 @@ void serf_bucket_request_become(
     /* The allocator remains the same. */
 }
 
-static apr_status_t serf_request_set_config(serf_bucket_t *bucket,
-                                            serf_config_t *config)
-{
-    request_context_t *ctx = bucket->data;
-
-    ctx->config = config;
-
-    return serf_bucket_set_config(ctx->headers, config);
-}
-
 const serf_bucket_type_t serf_bucket_type_request = {
     "REQUEST",
     serf_request_read,
     serf_request_readline,
     serf_request_read_iovec,
     serf_default_read_for_sendfile,
-    serf_buckets_are_v2,
-    serf_request_peek,
-    serf_request_destroy,
     serf_default_read_bucket,
-    NULL,
-    serf_request_set_config,
+    serf_request_peek,
+    serf_default_destroy_and_data,
 };
 

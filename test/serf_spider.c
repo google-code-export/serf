@@ -55,13 +55,13 @@
 /* The structure passed to the parser thread after we've read the entire
  * response.
  */
-typedef struct doc_path_t {
+typedef struct {
     apr_xml_doc *doc;
     char *path;
     apr_pool_t *pool;
 } doc_path_t;
 
-typedef struct app_baton_t {
+typedef struct {
     const char *authn;
     int using_ssl;
     serf_ssl_context_t *ssl_ctx;
@@ -114,7 +114,7 @@ static serf_bucket_t* accept_response(serf_request_t *request,
     return serf_bucket_response_create(c, bkt_alloc);
 }
 
-typedef struct handler_baton_t {
+typedef struct {
     serf_bucket_alloc_t *allocator;
 #if APR_MAJOR_VERSION > 0
     apr_uint32_t *requests_outstanding;
@@ -278,7 +278,7 @@ static apr_status_t handle_response(serf_request_t *request,
     /* NOTREACHED */
 }
 
-typedef struct parser_baton_t {
+typedef struct {
     apr_uint32_t *requests_outstanding;
     serf_connection_t *connection;
     apr_array_header_t *doc_queue;
@@ -324,6 +324,10 @@ static apr_status_t setup_request(serf_request_t *request,
     }
 
     if (ctx->app_ctx->using_ssl) {
+        serf_bucket_alloc_t *req_alloc;
+
+        req_alloc = serf_request_get_alloc(request);
+
         if (ctx->app_ctx->ssl_ctx == NULL) {
             *req_bkt = serf_bucket_ssl_encrypt_create(*req_bkt, NULL,
                                                       ctx->app_ctx->bkt_alloc);
@@ -623,7 +627,8 @@ int main(int argc, const char **argv)
     app_baton_t app_ctx;
     handler_baton_t *handler_ctx;
     apr_uri_t url;
-    const char *raw_url;
+    const char *raw_url, *method;
+    int count;
     apr_getopt_t *opt;
     char opt_c;
     char *authn = NULL;
@@ -641,6 +646,11 @@ int main(int argc, const char **argv)
     apr_pool_create(&pool, NULL);
     apr_atomic_init(pool);
     /* serf_initialize(); */
+
+    /* Default to one round of fetching. */
+    count = 1;
+    /* Default to GET. */
+    method = "GET";
 
     apr_getopt_init(&opt, pool, argc, argv);
 

@@ -23,15 +23,7 @@
 #include <apr_uri.h>
 
 #include "serf.h"
-
-#include "MockHTTPinC/MockHTTP.h"
-
-/* Test logging facilities, set flag to 1 to enable console logging for
-   the test suite. */
-#define TEST_VERBOSE 0
-
-/* Preferred proxy port */
-#define PROXY_PORT 23456
+#include "server/test_server.h"
 
 /** These macros are provided by APR itself from version 1.3.
  * Definitions are provided here for when using older versions of APR.
@@ -54,7 +46,6 @@ CuSuite *test_context(void);
 CuSuite *test_buckets(void);
 CuSuite *test_ssl(void);
 CuSuite *test_auth(void);
-CuSuite *test_internal(void);
 CuSuite *test_mock_bucket(void);
 
 /* Test setup declarations */
@@ -62,7 +53,43 @@ CuSuite *test_mock_bucket(void);
 #define CR "\r"
 #define LF "\n"
 
-typedef struct test_baton_t {
+#define CHUNKED_REQUEST(len, body)\
+        "GET / HTTP/1.1" CRLF\
+        "Host: localhost:12345" CRLF\
+        "Transfer-Encoding: chunked" CRLF\
+        CRLF\
+        #len CRLF\
+        body CRLF\
+        "0" CRLF\
+        CRLF
+
+#define CHUNKED_REQUEST_URI(uri, len, body)\
+        "GET " uri " HTTP/1.1" CRLF\
+        "Host: localhost:12345" CRLF\
+        "Transfer-Encoding: chunked" CRLF\
+        CRLF\
+        #len CRLF\
+        body CRLF\
+        "0" CRLF\
+        CRLF
+
+#define CHUNKED_RESPONSE(len, body)\
+        "HTTP/1.1 200 OK" CRLF\
+        "Transfer-Encoding: chunked" CRLF\
+        CRLF\
+        #len CRLF\
+        body CRLF\
+        "0" CRLF\
+        CRLF
+
+#define CHUNKED_EMPTY_RESPONSE\
+        "HTTP/1.1 200 OK" CRLF\
+        "Transfer-Encoding: chunked" CRLF\
+        CRLF\
+        "0" CRLF\
+        CRLF
+
+typedef struct {
     /* Pool for resource allocation. */
     apr_pool_t *pool;
 
@@ -70,11 +97,11 @@ typedef struct test_baton_t {
     serf_connection_t *connection;
     serf_bucket_alloc_t *bkt_alloc;
 
-    apr_port_t serv_port;
-    const char *serv_host; /* "localhost:30080" */
+    serv_ctx_t *serv_ctx;
+    apr_sockaddr_t *serv_addr;
 
+    serv_ctx_t *proxy_ctx;
     apr_sockaddr_t *proxy_addr;
-    apr_port_t proxy_port;
 
     /* Cache connection params here so it gets user for a test to switch to a
        new connection. */
@@ -93,17 +120,7 @@ typedef struct test_baton_t {
 
     serf_ssl_context_t *ssl_context;
     serf_ssl_need_server_cert_t server_cert_cb;
-    int enable_ocsp_stapling;
-
-    /* Context for the MockHTTP library */
-    MockHTTP *mh;
 } test_baton_t;
-
-typedef enum test_verify_clientcert_t {
-    test_clientcert_none,
-    test_clientcert_optional,
-    test_clientcert_mandatory,
-} test_verify_clientcert_t;
 
 apr_status_t default_https_conn_setup(apr_socket_t *skt,
                                       serf_bucket_t **input_bkt,
@@ -114,10 +131,64 @@ apr_status_t default_https_conn_setup(apr_socket_t *skt,
 apr_status_t use_new_connection(test_baton_t *tb,
                                 apr_pool_t *pool);
 
+apr_status_t test_https_server_setup(test_baton_t **tb_p,
+                                     test_server_message_t *message_list,
+                                     apr_size_t message_count,
+                                     test_server_action_t *action_list,
+                                     apr_size_t action_count,
+                                     apr_int32_t options,
+                                     serf_connection_setup_t conn_setup,
+                                     const char *keyfile,
+                                     const char **certfile,
+                                     const char *client_cn,
+                                     serf_ssl_need_server_cert_t server_cert_cb,
+                                     apr_pool_t *pool);
+
+apr_status_t test_http_server_setup(test_baton_t **tb_p,
+                                    test_server_message_t *message_list,
+                                    apr_size_t message_count,
+                                    test_server_action_t *action_list,
+                                    apr_size_t action_count,
+                                    apr_int32_t options,
+                                    serf_connection_setup_t conn_setup,
+                                    apr_pool_t *pool);
+
+apr_status_t test_server_proxy_setup(
+                 test_baton_t **tb_p,
+                 test_server_message_t *serv_message_list,
+                 apr_size_t serv_message_count,
+                 test_server_action_t *serv_action_list,
+                 apr_size_t serv_action_count,
+                 test_server_message_t *proxy_message_list,
+                 apr_size_t proxy_message_count,
+                 test_server_action_t *proxy_action_list,
+                 apr_size_t proxy_action_count,
+                 apr_int32_t options,
+                 serf_connection_setup_t conn_setup,
+                 apr_pool_t *pool);
+
+apr_status_t test_https_server_proxy_setup(
+                 test_baton_t **tb_p,
+                 test_server_message_t *serv_message_list,
+                 apr_size_t serv_message_count,
+                 test_server_action_t *serv_action_list,
+                 apr_size_t serv_action_count,
+                 test_server_message_t *proxy_message_list,
+                 apr_size_t proxy_message_count,
+                 test_server_action_t *proxy_action_list,
+                 apr_size_t proxy_action_count,
+                 apr_int32_t options,
+                 serf_connection_setup_t conn_setup,
+                 const char *keyfile,
+                 const char **certfiles,
+                 const char *client_cn,
+                 serf_ssl_need_server_cert_t server_cert_cb,
+                 apr_pool_t *pool);
+
 void *test_setup(void *baton);
 void *test_teardown(void *baton);
 
-typedef struct handler_baton_t {
+typedef struct {
     serf_response_acceptor_t acceptor;
     void *acceptor_baton;
 
@@ -142,10 +213,18 @@ typedef struct handler_baton_t {
 #define TEST_RESULT_SERVERCERTCHAINCB_CALLED 0x0002
 #define TEST_RESULT_CLIENT_CERTCB_CALLED     0x0004
 #define TEST_RESULT_CLIENT_CERTPWCB_CALLED   0x0008
-#define TEST_RESULT_AUTHNCB_CALLED           0x0010
-#define TEST_RESULT_HANDLE_RESPONSECB_CALLED 0x0020
-#define TEST_RESULT_OCSP_CHECK_SUCCESSFUL    0x0040
+#define TEST_RESULT_AUTHNCB_CALLED           0x001A
 
+apr_status_t
+test_helper_run_requests_no_check(CuTest *tc, test_baton_t *tb,
+                                  int num_requests,
+                                  handler_baton_t handler_ctx[],
+                                  apr_pool_t *pool);
+void
+test_helper_run_requests_expect_ok(CuTest *tc, test_baton_t *tb,
+                                   int num_requests,
+                                   handler_baton_t handler_ctx[],
+                                   apr_pool_t *pool);
 serf_bucket_t* accept_response(serf_request_t *request,
                                serf_bucket_t *stream,
                                void *acceptor_baton,
@@ -181,19 +260,8 @@ create_new_request_with_resp_hdlr(test_baton_t *tb,
                                   int req_id,
                                   serf_response_handler_t handler);
 
-const char *create_large_response_message(apr_pool_t *pool);
-const char *create_large_request_message_body(apr_pool_t *pool);
-const char *create_large_request_message(apr_pool_t *pool, const char *body);
-apr_status_t dummy_authn_callback(char **username,
-                                  char **password,
-                                  serf_request_t *request, void *baton,
-                                  int code, const char *authn_type,
-                                  const char *realm,
-                                  apr_pool_t *pool);
-
-
 /* Mock bucket type and constructor */
-typedef struct mockbkt_action {
+typedef struct {
     int times;
     const char *data;
     apr_status_t status;
@@ -206,91 +274,12 @@ void readlines_and_check_bucket(CuTest *tc, serf_bucket_t *bkt,
                                 const char *expected,
                                 int expected_nr_of_lines);
 
-extern const serf_bucket_type_t serf_bucket_type_mock_socket;
-#define SERF_BUCKET_IS_MOCK_SOCKET(b) SERF_BUCKET_CHECK((b), mock_socket)
+extern const serf_bucket_type_t serf_bucket_type_mock;
+#define SERF_BUCKET_IS_MOCK(b) SERF_BUCKET_CHECK((b), mock)
 
 serf_bucket_t *serf_bucket_mock_create(mockbkt_action *actions,
                                        int len,
                                        serf_bucket_alloc_t *allocator);
 apr_status_t serf_bucket_mock_more_data_arrived(serf_bucket_t *bucket);
-
-extern const serf_bucket_type_t serf_bucket_type_mock;
-#define SERF_BUCKET_IS_MOCK(b) SERF_BUCKET_CHECK((b), mock)
-
-serf_bucket_t *serf_bucket_mock_sock_create(serf_bucket_t *stream,
-                                            apr_status_t eof_status,
-                                            serf_bucket_alloc_t *allocator);
-
-/*****************************************************************************/
-/* Test utility functions, to be used with the MockHTTPinC framework         */
-/*****************************************************************************/
-
-/* Initiate a serf context configured to connect to the mock http server */
-apr_status_t setup_test_client_context(test_baton_t *tb,
-                                       serf_connection_setup_t conn_setup,
-                                       apr_pool_t *pool);
-
-/* Initiate a serf context configured to connect to the mock https server */
-apr_status_t
-setup_test_client_https_context(test_baton_t *tb,
-                                serf_connection_setup_t conn_setup,
-                                serf_ssl_need_server_cert_t server_cert_cb,
-                                apr_pool_t *pool);
-
-/* Initiate a serf context configured to connect to a http server over a
-   proxy */
-apr_status_t
-setup_test_client_context_with_proxy(test_baton_t *tb,
-                                     serf_connection_setup_t conn_setup,
-                                     apr_pool_t *pool);
-
-/* Initiate a serf context configured to connect to a https server over a
-   proxy */
-apr_status_t
-setup_serf_https_context_with_proxy(test_baton_t *tb,
-                                    serf_connection_setup_t conn_setup,
-                                    serf_ssl_need_server_cert_t server_cert_cb,
-                                    apr_pool_t *pool);
-
-/* Setup a mock test server on localhost on the default port. The actual port
-   will be stored in tb->port. */
-void setup_test_mock_server(test_baton_t *tb);
-
-void setup_test_mock_https_server(test_baton_t *tb,
-                                  const char *keyfile,
-                                  const char **certfiles,
-                                  test_verify_clientcert_t t);
-
-apr_status_t setup_test_mock_proxy(test_baton_t *tb);
-
-/* Helper function, runs the client and server context loops. */
-apr_status_t
-run_client_and_mock_servers_loops(test_baton_t *tb,
-                                  int num_requests,
-                                  handler_baton_t handler_ctx[],
-                                  apr_pool_t *pool);
-
-/* Helper function, runs the client and server context loops and validates
-   that no errors were encountered, and all messages were sent and received
-   in order. */
-void
-run_client_and_mock_servers_loops_expect_ok(CuTest *tc, test_baton_t *tb,
-                                            int num_requests,
-                                            handler_baton_t handler_ctx[],
-                                            apr_pool_t *pool);
-
-/* Logs a standard event, with filename & timestamp header */
-void test__log(int verbose_flag, const char *filename, const char *fmt, ...);
-
-/* Logs a socket event, add local and remote ip address:port */
-void test__log_skt(int verbose_flag, const char *filename, apr_socket_t *skt,
-                   const char *fmt, ...);
-/* Logs a standard event, but without prefix. This is useful to build up
- log lines in parts. */
-void test__log_nopref(int verbose_flag, const char *fmt, ...);
-
-/* Helper to get a file relative to our source directory by looking at
- * 'srcdir' env variable. */
-const char * get_srcdir_file(apr_pool_t *pool, const char * file);
 
 #endif /* TEST_SERF_H */

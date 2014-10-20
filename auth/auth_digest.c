@@ -233,6 +233,7 @@ serf__handle_digest_auth(int code,
                          serf_bucket_t *response,
                          const char *auth_hdr,
                          const char *auth_attr,
+                         void *baton,
                          apr_pool_t *pool)
 {
     char *attrs;
@@ -319,7 +320,7 @@ serf__handle_digest_auth(int code,
     apr_pool_create(&cred_pool, pool);
     status = serf__provide_credentials(ctx,
                                        &username, &password,
-                                       request,
+                                       request, baton,
                                        code, authn_info->scheme->name,
                                        realm, cred_pool);
     if (status) {
@@ -353,7 +354,7 @@ serf__handle_digest_auth(int code,
 
     /* If the handshake is finished tell serf it can send as much requests as it
        likes. */
-    serf__connection_set_pipelining(conn, 1);
+    serf_connection_set_max_outstanding_requests(conn, 0);
 
     return status;
 }
@@ -386,7 +387,7 @@ serf__init_digest_connection(const serf__authn_scheme_t *scheme,
     }
 
     /* Make serf send the initial requests one by one */
-    serf__connection_set_pipelining(conn, 0);
+    serf_connection_set_max_outstanding_requests(conn, 1);
 
     return APR_SUCCESS;
 }

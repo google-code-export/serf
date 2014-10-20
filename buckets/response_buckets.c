@@ -21,7 +21,7 @@
 #include "serf_bucket_util.h"
 #include "serf_private.h"
 
-typedef struct response_context_t {
+typedef struct {
     serf_bucket_t *stream;
     serf_bucket_t *body;        /* Pointer to the stream wrapping the body. */
     serf_bucket_t *headers;     /* holds parsed headers */
@@ -34,15 +34,13 @@ typedef struct response_context_t {
         STATE_DONE              /* we've sent EOF */
     } state;
 
+    /* Buffer for accumulating a line from the response. */
+    serf_linebuf_t linebuf;
+
     serf_status_line sl;
 
     int chunked;                /* Do we need to read trailers? */
     int head_req;               /* Was this a HEAD request? */
-
-    serf_config_t *config;
-
-    /* Buffer for accumulating a line from the response. */
-    serf_linebuf_t linebuf;
 } response_context_t;
 
 /* Returns 1 if according to RFC2626 this response can have a body, 0 if it
@@ -163,10 +161,7 @@ static apr_status_t fetch_headers(serf_bucket_t *bkt, response_context_t *ctx)
      * accept any kind of line ending.
      */
     status = fetch_line(ctx, SERF_NEWLINE_ANY);
-    /* Convert generic 'line too long' error to specific one. */
-    if (status == SERF_ERROR_LINE_TOO_LONG) {
-        return SERF_ERROR_RESPONSE_HEADER_TOO_LONG;
-    } else if (SERF_BUCKET_READ_ERROR(status)) {
+    if (SERF_BUCKET_READ_ERROR(status)) {
         return status;
     }
     /* Something was read. Process it. */
@@ -222,11 +217,7 @@ static apr_status_t run_machine(serf_bucket_t *bkt, response_context_t *ctx)
          * accept any kind of line ending.
          */
         status = fetch_line(ctx, SERF_NEWLINE_ANY);
-
-        /* Convert generic 'line too long' error to specific one. */
-        if (status == SERF_ERROR_LINE_TOO_LONG)
-            return SERF_ERROR_STATUS_LINE_TOO_LONG;
-        else if (SERF_BUCKET_READ_ERROR(status))
+        if (SERF_BUCKET_READ_ERROR(status))
             return status;
 
         if (ctx->linebuf.state == SERF_LINEBUF_READY) {
@@ -310,13 +301,11 @@ static apr_status_t run_machine(serf_bucket_t *bkt, response_context_t *ctx)
                     ctx->body =
                         serf_bucket_deflate_create(ctx->body, bkt->allocator,
                                                    SERF_DEFLATE_GZIP);
-                    serf_bucket_set_config(ctx->body, ctx->config);
                 }
                 else if (v && strcasecmp("deflate", v) == 0) {
                     ctx->body =
                         serf_bucket_deflate_create(ctx->body, bkt->allocator,
                                                    SERF_DEFLATE_DEFLATE);
-                    serf_bucket_set_config(ctx->body, ctx->config);
                 }
             }
         }
@@ -484,16 +473,6 @@ apr_status_t serf_response_full_become_aggregate(serf_bucket_t *bucket)
     return APR_SUCCESS;
 }
 
-static apr_status_t serf_response_set_config(serf_bucket_t *bucket,
-                                             serf_config_t *config)
-{
-    response_context_t *ctx = bucket->data;
-
-    ctx->config = config;
-
-    return serf_bucket_set_config(ctx->stream, config);
-}
-
 /* ### need to implement */
 #define serf_response_peek NULL
 
@@ -503,10 +482,7 @@ const serf_bucket_type_t serf_bucket_type_response = {
     serf_response_readline,
     serf_default_read_iovec,
     serf_default_read_for_sendfile,
-    serf_buckets_are_v2,
+    serf_default_read_bucket,
     serf_response_peek,
     serf_response_destroy_and_data,
-    serf_default_read_bucket,
-    NULL,
-    serf_response_set_config,
 };

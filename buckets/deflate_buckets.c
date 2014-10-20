@@ -24,7 +24,6 @@
 
 #include "serf.h"
 #include "serf_bucket_util.h"
-#include "serf_private.h"
 
 /* magic header */
 static char deflate_magic[2] = { '\037', '\213' };
@@ -35,7 +34,7 @@ static char deflate_magic[2] = { '\037', '\213' };
 static const int DEFLATE_WINDOW_SIZE = -15;
 static const int DEFLATE_MEMLEVEL = 9;
 
-typedef struct deflate_context_t {
+typedef struct {
     serf_bucket_t *stream;
     serf_bucket_t *inflate_stream;
 
@@ -68,7 +67,6 @@ typedef struct deflate_context_t {
 
     int stream_status; /* What was the last status we read? */
 
-    serf_config_t *config;
 } deflate_context_t;
 
 /* Inputs a string and returns a long.  */
@@ -179,16 +177,9 @@ static apr_status_t serf_deflate_read(serf_bucket_t *bucket,
         case STATE_HEADER:
             if (ctx->hdr_buffer[0] != deflate_magic[0] ||
                 ctx->hdr_buffer[1] != deflate_magic[1]) {
-
-                serf__log(LOGLVL_ERROR, LOGCOMP_COMPR, __FILE__, ctx->config,
-                          "Incorrect magic number. Actual:%hhx%hhx.\n",
-                          ctx->hdr_buffer[0], ctx->hdr_buffer[1]);
                 return SERF_ERROR_DECOMPRESSION_FAILED;
             }
             if (ctx->hdr_buffer[3] != 0) {
-                serf__log(LOGLVL_ERROR, LOGCOMP_COMPR, __FILE__, ctx->config,
-                          "Incorrect magic number (at offset 3). Actual: "
-                          "%x\n", ctx->hdr_buffer[3]);
                 return SERF_ERROR_DECOMPRESSION_FAILED;
             }
             ctx->state++;
@@ -200,9 +191,6 @@ static apr_status_t serf_deflate_read(serf_bucket_t *bucket,
             /* Do the checksum computation. */
             compCRC = getLong((unsigned char*)ctx->hdr_buffer);
             if (ctx->crc != compCRC) {
-                serf__log(LOGLVL_ERROR, LOGCOMP_COMPR, __FILE__, ctx->config,
-                          "Incorrect crc. Expected: %ld, Actual:%ld\n",
-                          compCRC, ctx->crc);
                 return SERF_ERROR_DECOMPRESSION_FAILED;
             }
             compLen = getLong((unsigned char*)ctx->hdr_buffer + 4);
@@ -211,9 +199,6 @@ static apr_status_t serf_deflate_read(serf_bucket_t *bucket,
             actualLen = ctx->zstream.total_out;
             actualLen &= 0xFFFFFFFF;
             if (actualLen != compLen) {
-                serf__log(LOGLVL_ERROR, LOGCOMP_COMPR, __FILE__, ctx->config,
-                          "Incorrect length. Expected: %ld, Actual:%ld\n",
-                          compLen, ctx->zstream.total_out);
                 return SERF_ERROR_DECOMPRESSION_FAILED;
             }
             ctx->state++;
@@ -222,9 +207,6 @@ static apr_status_t serf_deflate_read(serf_bucket_t *bucket,
         case STATE_INIT:
             zRC = inflateInit2(&ctx->zstream, ctx->windowSize);
             if (zRC != Z_OK) {
-                serf__log(LOGLVL_ERROR, LOGCOMP_COMPR, __FILE__, ctx->config,
-                          "inflateInit2 error %d - %s\n",
-                          zRC, ctx->zstream.msg);
                 return SERF_ERROR_DECOMPRESSION_FAILED;
             }
             ctx->zstream.next_out = ctx->buffer;
@@ -329,7 +311,6 @@ static apr_status_t serf_deflate_read(serf_bucket_t *bucket,
 
                     /* Push back the remaining data to be read. */
                     tmp = serf_bucket_aggregate_create(bucket->allocator);
-                    serf_bucket_set_config(tmp, ctx->config);
                     serf_bucket_aggregate_prepend(tmp, ctx->stream);
                     ctx->stream = tmp;
 
@@ -362,9 +343,6 @@ static apr_status_t serf_deflate_read(serf_bucket_t *bucket,
 
                 /* Any other error? */
                 if (zRC != Z_OK) {
-                    serf__log(LOGLVL_ERROR, LOGCOMP_COMPR, __FILE__,
-                              ctx->config, "inflate error %d - %s\n",
-                              zRC, ctx->zstream.msg);
                     return SERF_ERROR_DECOMPRESSION_FAILED;
                 }
 
@@ -392,12 +370,8 @@ static apr_status_t serf_deflate_read(serf_bucket_t *bucket,
                        and we have an error. */
                     if (ctx->state != STATE_INFLATE)
                         return APR_SUCCESS;
-                    else {
-                        serf__log(LOGLVL_ERROR, LOGCOMP_COMPR, __FILE__,
-                                  ctx->config,
-                                  "Unexpected EOF on input stream\n");
+                    else
                         return SERF_ERROR_DECOMPRESSION_FAILED;
-                    }
                 }
             }
             return status;
@@ -413,16 +387,6 @@ static apr_status_t serf_deflate_read(serf_bucket_t *bucket,
     /* NOTREACHED */
 }
 
-static apr_status_t serf_deflate_set_config(serf_bucket_t *bucket,
-                                            serf_config_t *config)
-{
-    deflate_context_t *ctx = bucket->data;
-
-    ctx->config = config;
-
-    return serf_bucket_set_config(ctx->stream, config);
-}
-
 /* ### need to implement */
 #define serf_deflate_readline NULL
 #define serf_deflate_peek NULL
@@ -433,10 +397,7 @@ const serf_bucket_type_t serf_bucket_type_deflate = {
     serf_deflate_readline,
     serf_default_read_iovec,
     serf_default_read_for_sendfile,
-    serf_buckets_are_v2,
+    serf_default_read_bucket,
     serf_deflate_peek,
     serf_deflate_destroy_and_data,
-    serf_default_read_bucket,
-    NULL,
-    serf_deflate_set_config,
 };
